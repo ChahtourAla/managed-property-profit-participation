@@ -1,0 +1,191 @@
+module Settlement where
+
+import Subscription
+
+template FinalReconciliation
+  with
+    easycoin : Party
+    owner : Party
+    auditor : Party
+    paymentVerifier : Party
+    legalAdmin : Party
+    contractId : Text
+    instrumentId : Text
+    totalUnits : Decimal
+    totalRentalIncome : Decimal
+    totalExpenses : Decimal
+    netProfitBeforeFee : Decimal
+    easycoinFee : Decimal
+    ownerSideDistributableProfit : Decimal
+    investorRewardPool : Decimal
+    ownerRetainedProfit : Decimal
+    finalReportHash : Text
+    status : Text
+  where
+    signatory easycoin
+    observer owner, auditor, paymentVerifier, legalAdmin
+
+    ensure
+      status == "RECONCILED"
+      && totalUnits > 0.0
+      && netProfitBeforeFee == totalRentalIncome - totalExpenses
+      && ownerSideDistributableProfit == netProfitBeforeFee - easycoinFee
+      && investorRewardPool + ownerRetainedProfit == ownerSideDistributableProfit
+
+    nonconsuming choice CreateRewardRecord : ContractId RewardRecord
+      with
+        investor : Party
+        holdingCid : ContractId ProfitParticipationHolding
+      controller easycoin
+      do
+        holding <- fetch holdingCid
+
+        assertMsg "Holding belongs to another investor" (holding.holder == investor)
+        assertMsg "Holding belongs to another contract" (holding.contractId == contractId)
+        assertMsg "Holding belongs to another instrument" (holding.instrumentIdText == instrumentId)
+        assertMsg "Holding amount cannot exceed total units" (holding.amount <= totalUnits)
+
+        let rewardAmount = (holding.amount / totalUnits) * investorRewardPool
+
+        create RewardRecord with
+          investor
+          easycoin
+          auditor
+          paymentVerifier
+          contractId
+          instrumentId
+          unitsHeld = holding.amount
+          totalUnits
+          investorRewardPool
+          rewardAmount
+          status = "PAYMENT_PENDING"
+
+    choice CloseAfterSettlement : ContractId ClosedManagedContract
+      with
+        closureNote : Text
+      controller easycoin
+      do
+        create ClosedManagedContract with
+          easycoin
+          owner
+          auditor
+          paymentVerifier
+          legalAdmin
+          contractId
+          instrumentId
+          finalReportHash
+          closureNote
+          status = "CLOSED"
+
+template RewardRecord
+  with
+    investor : Party
+    easycoin : Party
+    auditor : Party
+    paymentVerifier : Party
+    contractId : Text
+    instrumentId : Text
+    unitsHeld : Decimal
+    totalUnits : Decimal
+    investorRewardPool : Decimal
+    rewardAmount : Decimal
+    status : Text
+  where
+    signatory easycoin
+    observer investor, auditor, paymentVerifier
+
+    ensure
+      unitsHeld > 0.0
+      && totalUnits > 0.0
+      && investorRewardPool >= 0.0
+      && rewardAmount == (unitsHeld / totalUnits) * investorRewardPool
+      && status == "PAYMENT_PENDING"
+
+    choice ConfirmRewardPayment : ContractId RewardPaymentConfirmation
+      with
+        rewardPaymentReference : Text
+      controller paymentVerifier
+      do
+        create RewardPaymentConfirmation with
+          investor
+          easycoin
+          paymentVerifier
+          auditor
+          contractId
+          instrumentId
+          rewardAmount
+          rewardPaymentReference
+          status = "REWARD_PAID"
+
+template RewardPaymentConfirmation
+  with
+    investor : Party
+    easycoin : Party
+    paymentVerifier : Party
+    auditor : Party
+    contractId : Text
+    instrumentId : Text
+    rewardAmount : Decimal
+    rewardPaymentReference : Text
+    status : Text
+  where
+    signatory paymentVerifier
+    observer investor, easycoin, auditor
+
+template ClosedManagedContract
+  with
+    easycoin : Party
+    owner : Party
+    auditor : Party
+    paymentVerifier : Party
+    legalAdmin : Party
+    contractId : Text
+    instrumentId : Text
+    finalReportHash : Text
+    closureNote : Text
+    status : Text
+  where
+    signatory easycoin
+    observer owner, auditor, paymentVerifier, legalAdmin
+
+    nonconsuming choice RedeemHolding : ContractId TokenRedemptionBurnRecord
+      with
+        holdingCid : ContractId ProfitParticipationHolding
+        burnReference : Text
+      controller easycoin
+      do
+        holding <- fetch holdingCid
+
+        assertMsg "Holding belongs to another contract" (holding.contractId == contractId)
+        assertMsg "Holding belongs to another instrument" (holding.instrumentIdText == instrumentId)
+        assertMsg "Holding is not active" (holding.status == "ACTIVE")
+
+        archive holdingCid
+
+        create TokenRedemptionBurnRecord with
+          easycoin
+          owner
+          auditor
+          paymentVerifier
+          holder = holding.holder
+          contractId
+          instrumentId
+          redeemedUnits = holding.amount
+          burnReference
+          status = "TOKENS_REDEEMED_BURNED"
+
+template TokenRedemptionBurnRecord
+  with
+    easycoin : Party
+    owner : Party
+    auditor : Party
+    paymentVerifier : Party
+    holder : Party
+    contractId : Text
+    instrumentId : Text
+    redeemedUnits : Decimal
+    burnReference : Text
+    status : Text
+  where
+    signatory easycoin
+    observer owner, auditor, paymentVerifier, holder

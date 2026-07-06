@@ -1,0 +1,173 @@
+module Subscription where
+
+import qualified Splice.Api.Token.HoldingV1 as Token
+import qualified Splice.Api.Token.MetadataV1 as TokenMeta
+
+template ApprovedInvestor
+  with
+    easycoin : Party
+    legalAdmin : Party
+    investor : Party
+    approvalReference : Text
+  where
+    signatory easycoin
+    observer legalAdmin, investor
+
+template TokenSupply
+  with
+    easycoin : Party
+    propertyOwner : Party
+    auditor : Party
+    paymentVerifier : Party
+    legalAdmin : Party
+    contractId : Text
+    instrumentId : Text
+    totalUnits : Decimal
+    issuedUnits : Decimal
+    status : Text
+  where
+    signatory easycoin
+    observer propertyOwner, auditor, paymentVerifier, legalAdmin
+
+    ensure
+      totalUnits > 0.0
+      && issuedUnits >= 0.0
+      && issuedUnits <= totalUnits
+      && status /= ""
+
+template InvestorSubscription
+  with
+    investor : Party
+    easycoin : Party
+    propertyOwner : Party
+    auditor : Party
+    paymentVerifier : Party
+    legalAdmin : Party
+    contractId : Text
+    instrumentId : Text
+    requestedUnits : Decimal
+    upfrontAmount : Decimal
+    paymentReference : Text
+    status : Text
+  where
+    signatory investor
+    observer easycoin, propertyOwner, auditor, paymentVerifier, legalAdmin
+
+    ensure
+      requestedUnits > 0.0
+      && upfrontAmount > 0.0
+      && status /= ""
+
+    choice ConfirmFunding : (ContractId FundingConfirmation, ContractId ProfitParticipationHolding, ContractId TokenSupply)
+      with
+        confirmedPaymentReference : Text
+        supplyCid : ContractId TokenSupply
+      controller paymentVerifier, easycoin
+      do
+        supply <- fetch supplyCid
+
+        assertMsg "Token supply belongs to another Easycoin party" (supply.easycoin == easycoin)
+        assertMsg "Token supply belongs to another property owner" (supply.propertyOwner == propertyOwner)
+        assertMsg "Token supply belongs to another contract" (supply.contractId == contractId)
+        assertMsg "Token supply belongs to another instrument" (supply.instrumentId == instrumentId)
+        assertMsg "Subscription round is not open" (supply.status == "SUBSCRIPTION_OPEN")
+
+        let newIssuedUnits = supply.issuedUnits + requestedUnits
+
+        assertMsg "Requested units exceed available supply" (newIssuedUnits <= supply.totalUnits)
+
+        archive supplyCid
+
+        let newStatus =
+              if newIssuedUnits == supply.totalUnits
+              then "FULLY_SUBSCRIBED"
+              else "SUBSCRIPTION_OPEN"
+
+        updatedSupplyCid <- create TokenSupply with
+          easycoin
+          propertyOwner
+          auditor
+          paymentVerifier
+          legalAdmin
+          contractId
+          instrumentId
+          totalUnits = supply.totalUnits
+          issuedUnits = newIssuedUnits
+          status = newStatus
+
+        fundingCid <- create FundingConfirmation with
+          investor
+          easycoin
+          propertyOwner
+          paymentVerifier
+          auditor
+          contractId
+          instrumentId
+          fundedUnits = requestedUnits
+          upfrontAmount
+          paymentReference
+          confirmedPaymentReference
+          status = "FUNDED"
+
+        holdingCid <- create ProfitParticipationHolding with
+          holder = investor
+          easycoin
+          propertyOwner
+          auditor
+          paymentVerifier
+          contractId
+          instrumentIdText = instrumentId
+          amount = requestedUnits
+          upfrontAmount
+          status = "ACTIVE"
+
+        pure (fundingCid, holdingCid, updatedSupplyCid)
+
+template FundingConfirmation
+  with
+    investor : Party
+    easycoin : Party
+    propertyOwner : Party
+    paymentVerifier : Party
+    auditor : Party
+    contractId : Text
+    instrumentId : Text
+    fundedUnits : Decimal
+    upfrontAmount : Decimal
+    paymentReference : Text
+    confirmedPaymentReference : Text
+    status : Text
+  where
+    signatory paymentVerifier
+    observer investor, easycoin, propertyOwner, auditor
+
+template ProfitParticipationHolding
+  with
+    holder : Party
+    easycoin : Party
+    propertyOwner : Party
+    auditor : Party
+    paymentVerifier : Party
+    contractId : Text
+    instrumentIdText : Text
+    amount : Decimal
+    upfrontAmount : Decimal
+    status : Text
+  where
+    signatory easycoin
+    observer holder, propertyOwner, auditor, paymentVerifier
+
+    ensure
+      amount > 0.0
+      && upfrontAmount > 0.0
+      && status == "ACTIVE"
+
+    interface instance Token.Holding for ProfitParticipationHolding where
+      view = Token.HoldingView with
+        owner = holder
+        instrumentId = Token.InstrumentId with
+          admin = easycoin
+          id = instrumentIdText
+        amount = amount
+        lock = None
+        meta = TokenMeta.emptyMetadata

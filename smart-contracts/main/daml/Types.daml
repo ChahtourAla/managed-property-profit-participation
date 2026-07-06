@@ -1,0 +1,25 @@
+module Types where
+
+data ContractSubmissionPath
+  = OwnerSubmitted
+  | EasycoinSubmitted
+  deriving (Eq, Show)
+
+data ManagedContractData = ManagedContractData with
+    contractId : Text
+    propertyId : Text
+    propertyName : Text
+    financialPeriod : Text
+    expectedRentalIncome : Decimal
+    expectedExpenses : Decimal
+    reportFrequency : Text
+  deriving (Eq, Show)
+
+data ParticipationTerms = ParticipationTerms with
+    easycoinFeeRate : Decimal
+    ownerProfitShareOffered : Decimal
+    ownerRetainedShare : Decimal
+    expectedInvestorSettlement : Decimal
+    expectedUpfrontFunding : Decimal
+    currency : Text
+  deriving (Eq, Show)

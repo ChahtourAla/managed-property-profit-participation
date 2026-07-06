@@ -1,0 +1,330 @@
+module ManagedContract where
+
+import Types
+import Subscription
+import Reporting
+import Settlement
+
+template OwnerSubmittedManagedContractDraft
+  with
+    owner : Party
+    easycoin : Party
+    legalAdmin : Party
+    auditor : Party
+    paymentVerifier : Party
+    contractData : ManagedContractData
+    terms : ParticipationTerms
+  where
+    signatory owner
+    observer easycoin, legalAdmin, auditor, paymentVerifier
+
+    ensure
+      contractData.expectedRentalIncome >= 0.0
+      && contractData.expectedExpenses >= 0.0
+      && terms.easycoinFeeRate >= 0.0
+      && terms.easycoinFeeRate <= 1.0
+      && terms.ownerProfitShareOffered > 0.0
+      && terms.ownerProfitShareOffered < 1.0
+      && terms.ownerRetainedShare > 0.0
+
+    choice ValidateByEasycoin : ContractId ValidatedManagedContract
+      controller easycoin
+      do
+        create ValidatedManagedContract with
+          owner
+          easycoin
+          legalAdmin
+          auditor
+          paymentVerifier
+          contractData
+          terms
+          submissionPath = OwnerSubmitted
+          validationReference = "VALIDATED_BY_EASYCOIN"
+
+    choice RejectByEasycoin : ContractId RejectedManagedContract
+      with
+        reason : Text
+      controller easycoin
+      do
+        create RejectedManagedContract with
+          owner
+          easycoin
+          auditor
+          contractId = contractData.contractId
+          reason
+
+template EasycoinSubmittedManagedContractDraft
+  with
+    owner : Party
+    easycoin : Party
+    legalAdmin : Party
+    auditor : Party
+    paymentVerifier : Party
+    contractData : ManagedContractData
+    terms : ParticipationTerms
+  where
+    signatory easycoin
+    observer owner, legalAdmin, auditor, paymentVerifier
+
+    ensure
+      contractData.expectedRentalIncome >= 0.0
+      && contractData.expectedExpenses >= 0.0
+      && terms.easycoinFeeRate >= 0.0
+      && terms.easycoinFeeRate <= 1.0
+      && terms.ownerProfitShareOffered > 0.0
+      && terms.ownerProfitShareOffered < 1.0
+      && terms.ownerRetainedShare > 0.0
+
+    choice OwnerConfirm : ContractId OwnerConfirmedManagedContract
+      controller owner
+      do
+        create OwnerConfirmedManagedContract with
+          owner
+          easycoin
+          legalAdmin
+          auditor
+          paymentVerifier
+          contractData
+          terms
+          confirmationReference = "OWNER_CONFIRMED"
+
+    choice OwnerRequestCorrection : ContractId CorrectionRequest
+      with
+        reason : Text
+      controller owner
+      do
+        create CorrectionRequest with
+          requestedBy = owner
+          targetParty = easycoin
+          contractId = contractData.contractId
+          reason
+
+template OwnerConfirmedManagedContract
+  with
+    owner : Party
+    easycoin : Party
+    legalAdmin : Party
+    auditor : Party
+    paymentVerifier : Party
+    contractData : ManagedContractData
+    terms : ParticipationTerms
+    confirmationReference : Text
+  where
+    signatory owner
+    observer easycoin, legalAdmin, auditor, paymentVerifier
+
+    choice ValidateConfirmedContractByEasycoin : ContractId ValidatedManagedContract
+      controller easycoin
+      do
+        create ValidatedManagedContract with
+          owner
+          easycoin
+          legalAdmin
+          auditor
+          paymentVerifier
+          contractData
+          terms
+          submissionPath = EasycoinSubmitted
+          validationReference = "VALIDATED_AFTER_OWNER_CONFIRMATION"
+
+template ValidatedManagedContract
+  with
+    owner : Party
+    easycoin : Party
+    legalAdmin : Party
+    auditor : Party
+    paymentVerifier : Party
+    contractData : ManagedContractData
+    terms : ParticipationTerms
+    submissionPath : ContractSubmissionPath
+    validationReference : Text
+  where
+    signatory easycoin
+    observer owner, legalAdmin, auditor, paymentVerifier
+
+    choice CreateTokenizedInstrument : (ContractId TokenizedInstrument, ContractId TokenSupply)
+      with
+        instrumentId : Text
+        totalUnits : Decimal
+        unitPrice : Decimal
+        approvedInvestors : [Party]
+      controller easycoin
+      do
+        assertMsg "Total units must be positive" (totalUnits > 0.0)
+        assertMsg "Unit price must be positive" (unitPrice > 0.0)
+
+        instrumentCid <- create TokenizedInstrument with
+          owner
+          easycoin
+          legalAdmin
+          auditor
+          paymentVerifier
+          contractId = contractData.contractId
+          propertyId = contractData.propertyId
+          financialPeriod = contractData.financialPeriod
+          terms
+          instrumentId
+          totalUnits
+          unitPrice
+          approvedInvestors
+          status = "SUBSCRIPTION_OPEN"
+
+        supplyCid <- create TokenSupply with
+          easycoin
+          propertyOwner = owner
+          auditor
+          paymentVerifier
+          legalAdmin
+          contractId = contractData.contractId
+          instrumentId
+          totalUnits
+          issuedUnits = 0.0
+          status = "SUBSCRIPTION_OPEN"
+
+        pure (instrumentCid, supplyCid)
+
+template TokenizedInstrument
+  with
+    owner : Party
+    easycoin : Party
+    legalAdmin : Party
+    auditor : Party
+    paymentVerifier : Party
+    contractId : Text
+    propertyId : Text
+    financialPeriod : Text
+    terms : ParticipationTerms
+    instrumentId : Text
+    totalUnits : Decimal
+    unitPrice : Decimal
+    approvedInvestors : [Party]
+    status : Text
+  where
+    signatory easycoin
+    observer owner, legalAdmin, auditor, paymentVerifier, approvedInvestors
+
+    ensure
+      totalUnits > 0.0
+      && unitPrice > 0.0
+      && status /= ""
+
+    nonconsuming choice Subscribe : ContractId InvestorSubscription
+      with
+        investor : Party
+        approvedInvestorCid : ContractId ApprovedInvestor
+        requestedUnits : Decimal
+        upfrontAmount : Decimal
+        paymentReference : Text
+      controller investor
+      do
+        approved <- fetch approvedInvestorCid
+
+        assertMsg "Investor is not approved by Easycoin" (approved.investor == investor)
+        assertMsg "Approval must belong to the same Easycoin party" (approved.easycoin == easycoin)
+        assertMsg "Investor is not in the approved investors list" (elem investor approvedInvestors)
+        assertMsg "Requested units must be positive" (requestedUnits > 0.0)
+        assertMsg "Requested units exceed total supply" (requestedUnits <= totalUnits)
+        assertMsg "Upfront amount must be positive" (upfrontAmount > 0.0)
+        assertMsg "Upfront amount must equal requested units times unit price" (upfrontAmount == requestedUnits * unitPrice)
+
+        create InvestorSubscription with
+          investor
+          easycoin
+          propertyOwner = owner
+          auditor
+          paymentVerifier
+          legalAdmin
+          contractId
+          instrumentId
+          requestedUnits
+          upfrontAmount
+          paymentReference
+          status = "FUNDING_PENDING"
+
+    nonconsuming choice RecordPerformanceReport : ContractId PerformanceReport
+      with
+        periodLabel : Text
+        rentalIncome : Decimal
+        expenses : Decimal
+        estimatedNetProfit : Decimal
+        reportUri : Text
+        reportHash : Text
+        isFinal : Bool
+      controller easycoin
+      do
+        assertMsg "Rental income must be non-negative" (rentalIncome >= 0.0)
+        assertMsg "Expenses must be non-negative" (expenses >= 0.0)
+        assertMsg "Estimated net profit calculation is incorrect" (estimatedNetProfit == rentalIncome - expenses)
+
+        create PerformanceReport with
+          easycoin
+          owner
+          auditor
+          contractId
+          instrumentId
+          periodLabel
+          rentalIncome
+          expenses
+          estimatedNetProfit
+          reportUri
+          reportHash
+          isFinal
+
+    choice SubmitFinalReconciliation : ContractId FinalReconciliation
+      with
+        totalRentalIncome : Decimal
+        totalExpenses : Decimal
+        netProfitBeforeFee : Decimal
+        easycoinFee : Decimal
+        ownerSideDistributableProfit : Decimal
+        investorRewardPool : Decimal
+        ownerRetainedProfit : Decimal
+        finalReportHash : Text
+      controller easycoin
+      do
+        assertMsg "Final net profit calculation is incorrect" (netProfitBeforeFee == totalRentalIncome - totalExpenses)
+        assertMsg "Owner-side distributable profit calculation is incorrect" (ownerSideDistributableProfit == netProfitBeforeFee - easycoinFee)
+        assertMsg "Investor pool plus owner retained profit must equal owner-side distributable profit"
+          (investorRewardPool + ownerRetainedProfit == ownerSideDistributableProfit)
+        assertMsg "Investor reward pool cannot be negative" (investorRewardPool >= 0.0)
+        assertMsg "Owner retained profit cannot be negative" (ownerRetainedProfit >= 0.0)
+
+        create FinalReconciliation with
+          easycoin
+          owner
+          auditor
+          paymentVerifier
+          legalAdmin
+          contractId
+          instrumentId
+          totalUnits
+          totalRentalIncome
+          totalExpenses
+          netProfitBeforeFee
+          easycoinFee
+          ownerSideDistributableProfit
+          investorRewardPool
+          ownerRetainedProfit
+          finalReportHash
+          status = "RECONCILED"
+
+template RejectedManagedContract
+  with
+    owner : Party
+    easycoin : Party
+    auditor : Party
+    contractId : Text
+    reason : Text
+  where
+    signatory easycoin
+    observer owner, auditor
+
+template CorrectionRequest
+  with
+    requestedBy : Party
+    targetParty : Party
+    contractId : Text
+    reason : Text
+  where
+    signatory requestedBy
+    observer targetParty

@@ -1,0 +1,6 @@
+sdk-version: 3.4.11
+
+packages:
+  - ./token-standard-api
+  - ./main
+  - ./test

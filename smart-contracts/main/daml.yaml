@@ -1,0 +1,9 @@
+sdk-version: 3.4.11
+name: smart-contracts-main
+source: daml
+version: 0.0.1
+dependencies:
+  - daml-prim
+  - daml-stdlib
+data-dependencies:
+  - ../token-standard-api/.daml/dist/token-standard-api-0.0.1.dar

@@ -1,0 +1,47 @@
+module Reporting where
+
+template PerformanceReport
+  with
+    easycoin : Party
+    owner : Party
+    auditor : Party
+    contractId : Text
+    instrumentId : Text
+    periodLabel : Text
+    rentalIncome : Decimal
+    expenses : Decimal
+    estimatedNetProfit : Decimal
+    reportUri : Text
+    reportHash : Text
+    isFinal : Bool
+  where
+    signatory easycoin
+    observer owner, auditor
+
+    ensure
+      rentalIncome >= 0.0
+      && expenses >= 0.0
+      && estimatedNetProfit == rentalIncome - expenses
+
+    choice AuditorAcceptReport : ContractId ReportAccepted
+      controller auditor
+      do
+        create ReportAccepted with
+          auditor
+          easycoin
+          contractId
+          instrumentId
+          reportHash
+          decision = "ACCEPTED"
+
+template ReportAccepted
+  with
+    auditor : Party
+    easycoin : Party
+    contractId : Text
+    instrumentId : Text
+    reportHash : Text
+    decision : Text
+  where
+    signatory auditor
+    observer easycoin
