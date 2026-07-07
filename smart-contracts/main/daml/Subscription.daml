@@ -22,8 +22,19 @@ template TokenSupply
     legalAdmin : Party
     contractId : Text
     instrumentId : Text
+
+    -- Full tokenized contract supply
     totalUnits : Decimal
-    issuedUnits : Decimal
+
+    -- Part kept by the owner
+    ownerRetainedUnits : Decimal
+
+    -- Part made available to investors
+    investorOfferedUnits : Decimal
+
+    -- Investor units already issued after funding confirmations
+    investorIssuedUnits : Decimal
+
     status : Text
   where
     signatory easycoin
@@ -31,8 +42,11 @@ template TokenSupply
 
     ensure
       totalUnits > 0.0
-      && issuedUnits >= 0.0
-      && issuedUnits <= totalUnits
+      && ownerRetainedUnits > 0.0
+      && investorOfferedUnits > 0.0
+      && ownerRetainedUnits + investorOfferedUnits == totalUnits
+      && investorIssuedUnits >= 0.0
+      && investorIssuedUnits <= investorOfferedUnits
       && status /= ""
 
 template InvestorSubscription
@@ -72,14 +86,15 @@ template InvestorSubscription
         assertMsg "Token supply belongs to another instrument" (supply.instrumentId == instrumentId)
         assertMsg "Subscription round is not open" (supply.status == "SUBSCRIPTION_OPEN")
 
-        let newIssuedUnits = supply.issuedUnits + requestedUnits
+        let newInvestorIssuedUnits = supply.investorIssuedUnits + requestedUnits
 
-        assertMsg "Requested units exceed available supply" (newIssuedUnits <= supply.totalUnits)
+        assertMsg "Requested units exceed investor offered supply"
+          (newInvestorIssuedUnits <= supply.investorOfferedUnits)
 
         archive supplyCid
 
         let newStatus =
-              if newIssuedUnits == supply.totalUnits
+              if newInvestorIssuedUnits == supply.investorOfferedUnits
               then "FULLY_SUBSCRIBED"
               else "SUBSCRIPTION_OPEN"
 
@@ -92,7 +107,9 @@ template InvestorSubscription
           contractId
           instrumentId
           totalUnits = supply.totalUnits
-          issuedUnits = newIssuedUnits
+          ownerRetainedUnits = supply.ownerRetainedUnits
+          investorOfferedUnits = supply.investorOfferedUnits
+          investorIssuedUnits = newInvestorIssuedUnits
           status = newStatus
 
         fundingCid <- create FundingConfirmation with
@@ -159,7 +176,7 @@ template ProfitParticipationHolding
 
     ensure
       amount > 0.0
-      && upfrontAmount > 0.0
+      && upfrontAmount >= 0.0
       && status == "ACTIVE"
 
     interface instance Token.Holding for ProfitParticipationHolding where

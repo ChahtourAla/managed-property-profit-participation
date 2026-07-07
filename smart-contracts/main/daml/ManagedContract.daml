@@ -26,6 +26,8 @@ template OwnerSubmittedManagedContractDraft
       && terms.ownerProfitShareOffered > 0.0
       && terms.ownerProfitShareOffered < 1.0
       && terms.ownerRetainedShare > 0.0
+      && terms.ownerRetainedShare < 1.0
+      && terms.ownerProfitShareOffered + terms.ownerRetainedShare == 1.0
 
     choice ValidateByEasycoin : ContractId ValidatedManagedContract
       controller easycoin
@@ -74,6 +76,8 @@ template EasycoinSubmittedManagedContractDraft
       && terms.ownerProfitShareOffered > 0.0
       && terms.ownerProfitShareOffered < 1.0
       && terms.ownerRetainedShare > 0.0
+      && terms.ownerRetainedShare < 1.0
+      && terms.ownerProfitShareOffered + terms.ownerRetainedShare == 1.0
 
     choice OwnerConfirm : ContractId OwnerConfirmedManagedContract
       controller owner
@@ -142,16 +146,26 @@ template ValidatedManagedContract
     signatory easycoin
     observer owner, legalAdmin, auditor, paymentVerifier
 
-    choice CreateTokenizedInstrument : (ContractId TokenizedInstrument, ContractId TokenSupply)
+    choice CreateTokenizedInstrument : (ContractId TokenizedInstrument, ContractId TokenSupply, ContractId ProfitParticipationHolding)
       with
         instrumentId : Text
         totalUnits : Decimal
-        unitPrice : Decimal
+        nominalValuePerUnit : Decimal
+        investorUpfrontPricePerUnit : Decimal
         approvedInvestors : [Party]
       controller easycoin
       do
         assertMsg "Total units must be positive" (totalUnits > 0.0)
-        assertMsg "Unit price must be positive" (unitPrice > 0.0)
+        assertMsg "Nominal value per unit must be positive" (nominalValuePerUnit > 0.0)
+        assertMsg "Investor upfront price per unit must be positive" (investorUpfrontPricePerUnit > 0.0)
+        assertMsg "Investor upfront price must be lower than nominal value per unit"
+          (investorUpfrontPricePerUnit < nominalValuePerUnit)
+
+        let ownerRetainedUnits = totalUnits * terms.ownerRetainedShare
+        let investorOfferedUnits = totalUnits * terms.ownerProfitShareOffered
+
+        assertMsg "Owner retained units plus investor offered units must equal total units"
+          (ownerRetainedUnits + investorOfferedUnits == totalUnits)
 
         instrumentCid <- create TokenizedInstrument with
           owner
@@ -165,7 +179,10 @@ template ValidatedManagedContract
           terms
           instrumentId
           totalUnits
-          unitPrice
+          ownerRetainedUnits
+          investorOfferedUnits
+          nominalValuePerUnit
+          investorUpfrontPricePerUnit
           approvedInvestors
           status = "SUBSCRIPTION_OPEN"
 
@@ -178,10 +195,24 @@ template ValidatedManagedContract
           contractId = contractData.contractId
           instrumentId
           totalUnits
-          issuedUnits = 0.0
+          ownerRetainedUnits
+          investorOfferedUnits
+          investorIssuedUnits = 0.0
           status = "SUBSCRIPTION_OPEN"
 
-        pure (instrumentCid, supplyCid)
+        ownerHoldingCid <- create ProfitParticipationHolding with
+          holder = owner
+          easycoin
+          propertyOwner = owner
+          auditor
+          paymentVerifier
+          contractId = contractData.contractId
+          instrumentIdText = instrumentId
+          amount = ownerRetainedUnits
+          upfrontAmount = 0.0
+          status = "ACTIVE"
+
+        pure (instrumentCid, supplyCid, ownerHoldingCid)
 
 template TokenizedInstrument
   with
@@ -195,8 +226,22 @@ template TokenizedInstrument
     financialPeriod : Text
     terms : ParticipationTerms
     instrumentId : Text
+
+    -- Full tokenized contract supply
     totalUnits : Decimal
-    unitPrice : Decimal
+
+    -- Owner-side token allocation
+    ownerRetainedUnits : Decimal
+
+    -- Investor-side token allocation
+    investorOfferedUnits : Decimal
+
+    -- Final expected value per token
+    nominalValuePerUnit : Decimal
+
+    -- Discounted upfront purchase price per investor token
+    investorUpfrontPricePerUnit : Decimal
+
     approvedInvestors : [Party]
     status : Text
   where
@@ -205,7 +250,12 @@ template TokenizedInstrument
 
     ensure
       totalUnits > 0.0
-      && unitPrice > 0.0
+      && ownerRetainedUnits > 0.0
+      && investorOfferedUnits > 0.0
+      && ownerRetainedUnits + investorOfferedUnits == totalUnits
+      && nominalValuePerUnit > 0.0
+      && investorUpfrontPricePerUnit > 0.0
+      && investorUpfrontPricePerUnit < nominalValuePerUnit
       && status /= ""
 
     nonconsuming choice Subscribe : ContractId InvestorSubscription
@@ -223,9 +273,10 @@ template TokenizedInstrument
         assertMsg "Approval must belong to the same Easycoin party" (approved.easycoin == easycoin)
         assertMsg "Investor is not in the approved investors list" (elem investor approvedInvestors)
         assertMsg "Requested units must be positive" (requestedUnits > 0.0)
-        assertMsg "Requested units exceed total supply" (requestedUnits <= totalUnits)
+        assertMsg "Requested units exceed investor offered supply" (requestedUnits <= investorOfferedUnits)
         assertMsg "Upfront amount must be positive" (upfrontAmount > 0.0)
-        assertMsg "Upfront amount must equal requested units times unit price" (upfrontAmount == requestedUnits * unitPrice)
+        assertMsg "Upfront amount must equal requested units times investor upfront price per unit"
+          (upfrontAmount == requestedUnits * investorUpfrontPricePerUnit)
 
         create InvestorSubscription with
           investor
@@ -282,10 +333,27 @@ template TokenizedInstrument
         finalReportHash : Text
       controller easycoin
       do
-        assertMsg "Final net profit calculation is incorrect" (netProfitBeforeFee == totalRentalIncome - totalExpenses)
-        assertMsg "Owner-side distributable profit calculation is incorrect" (ownerSideDistributableProfit == netProfitBeforeFee - easycoinFee)
+        assertMsg "Final net profit calculation is incorrect"
+          (netProfitBeforeFee == totalRentalIncome - totalExpenses)
+
+        assertMsg "Easycoin fee calculation is incorrect"
+          (easycoinFee == netProfitBeforeFee * terms.easycoinFeeRate)
+
+        assertMsg "Owner-side distributable profit calculation is incorrect"
+          (ownerSideDistributableProfit == netProfitBeforeFee - easycoinFee)
+
+        assertMsg "Investor reward pool calculation is incorrect"
+          (investorRewardPool == ownerSideDistributableProfit * terms.ownerProfitShareOffered)
+
+        assertMsg "Owner retained profit calculation is incorrect"
+          (ownerRetainedProfit == ownerSideDistributableProfit * terms.ownerRetainedShare)
+
         assertMsg "Investor pool plus owner retained profit must equal owner-side distributable profit"
           (investorRewardPool + ownerRetainedProfit == ownerSideDistributableProfit)
+
+        assertMsg "Owner-side distributable profit must match token nominal value"
+          (ownerSideDistributableProfit == totalUnits * nominalValuePerUnit)
+
         assertMsg "Investor reward pool cannot be negative" (investorRewardPool >= 0.0)
         assertMsg "Owner retained profit cannot be negative" (ownerRetainedProfit >= 0.0)
 

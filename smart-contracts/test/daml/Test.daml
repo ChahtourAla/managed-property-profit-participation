@@ -84,23 +84,24 @@ setup = script do
       investor = investor4
       approvalReference = "KYC-APPROVED-INVESTOR-004"
 
-  debug "4. Easycoin creates tokenized instrument and TokenSupply"
+  debug "4. Easycoin creates tokenized instrument, TokenSupply, and owner retained holding"
 
-  (instrumentCid, supplyCid0) <- submit easycoin do
+  (instrumentCid, supplyCid0, ownerHoldingCid) <- submit easycoin do
     exerciseCmd validatedCid CreateTokenizedInstrument with
       instrumentId = "INSTR-MPC-001"
       totalUnits = 1000.0
-      unitPrice = 34.0
+      nominalValuePerUnit = 76.8
+      investorUpfrontPricePerUnit = 68.0
       approvedInvestors = [investor1, investor2, investor3, investor4]
 
-  debug "5. Investor1 subscribes to 100 units"
+  debug "5. Investor1 subscribes to 100 investor-offered units"
 
   subscription1Cid <- submit investor1 do
     exerciseCmd instrumentCid Subscribe with
       investor = investor1
       approvedInvestorCid = approvedInvestor1Cid
       requestedUnits = 100.0
-      upfrontAmount = 3400.0
+      upfrontAmount = 6800.0
       paymentReference = "BANK-UPFRONT-001"
 
   debug "6. Payment verifier and Easycoin confirm Investor1 funding"
@@ -110,14 +111,14 @@ setup = script do
       confirmedPaymentReference = "CONFIRMED-BANK-UPFRONT-001"
       supplyCid = supplyCid0
 
-  debug "7. Investor2 subscribes to 300 units"
+  debug "7. Investor2 subscribes to 200 investor-offered units"
 
   subscription2Cid <- submit investor2 do
     exerciseCmd instrumentCid Subscribe with
       investor = investor2
       approvedInvestorCid = approvedInvestor2Cid
-      requestedUnits = 300.0
-      upfrontAmount = 10200.0
+      requestedUnits = 200.0
+      upfrontAmount = 13600.0
       paymentReference = "BANK-UPFRONT-002"
 
   debug "8. Payment verifier and Easycoin confirm Investor2 funding"
@@ -127,14 +128,14 @@ setup = script do
       confirmedPaymentReference = "CONFIRMED-BANK-UPFRONT-002"
       supplyCid = supplyCid1
 
-  debug "9. Investor3 subscribes to 600 units"
+  debug "9. Investor3 subscribes to 200 investor-offered units"
 
   subscription3Cid <- submit investor3 do
     exerciseCmd instrumentCid Subscribe with
       investor = investor3
       approvedInvestorCid = approvedInvestor3Cid
-      requestedUnits = 600.0
-      upfrontAmount = 20400.0
+      requestedUnits = 200.0
+      upfrontAmount = 13600.0
       paymentReference = "BANK-UPFRONT-003"
 
   debug "10. Payment verifier and Easycoin confirm Investor3 funding"
@@ -144,14 +145,14 @@ setup = script do
       confirmedPaymentReference = "CONFIRMED-BANK-UPFRONT-003"
       supplyCid = supplyCid2
 
-  debug "11. Negative test: Investor4 tries to oversubscribe after full supply"
+  debug "11. Negative test: Investor4 tries to oversubscribe investor-offered supply"
 
   subscription4Cid <- submit investor4 do
     exerciseCmd instrumentCid Subscribe with
       investor = investor4
       approvedInvestorCid = approvedInvestor4Cid
       requestedUnits = 1.0
-      upfrontAmount = 34.0
+      upfrontAmount = 68.0
       paymentReference = "BANK-UPFRONT-004"
 
   submitMultiMustFail [paymentVerifier, easycoin] [] do
@@ -217,21 +218,26 @@ setup = script do
       ownerRetainedProfit = 38400.0
       finalReportHash = "HASH-FINAL-RECONCILIATION-001"
 
-  debug "20. Easycoin creates automatic reward records"
+  debug "20. Easycoin creates automatic reward records for owner and investors"
+
+  ownerRewardCid <- submit easycoin do
+    exerciseCmd reconciliationCid CreateRewardRecord with
+      recipient = owner
+      holdingCid = ownerHoldingCid
 
   reward1Cid <- submit easycoin do
     exerciseCmd reconciliationCid CreateRewardRecord with
-      investor = investor1
+      recipient = investor1
       holdingCid = holding1Cid
 
   reward2Cid <- submit easycoin do
     exerciseCmd reconciliationCid CreateRewardRecord with
-      investor = investor2
+      recipient = investor2
       holdingCid = holding2Cid
 
   reward3Cid <- submit easycoin do
     exerciseCmd reconciliationCid CreateRewardRecord with
-      investor = investor3
+      recipient = investor3
       holdingCid = holding3Cid
 
   debug "21. Negative test: investor cannot confirm reward payment"
@@ -242,7 +248,11 @@ setup = script do
 
   debug "22. Negative test passed: investor cannot confirm reward payment"
 
-  debug "23. Payment verifier confirms reward payments"
+  debug "23. Payment verifier confirms owner and investor reward payments"
+
+  ownerRewardPaymentCid <- submit paymentVerifier do
+    exerciseCmd ownerRewardCid ConfirmRewardPayment with
+      rewardPaymentReference = "BANK-OWNER-RETAINED-PROFIT-001"
 
   rewardPayment1Cid <- submit paymentVerifier do
     exerciseCmd reward1Cid ConfirmRewardPayment with
@@ -262,7 +272,12 @@ setup = script do
     exerciseCmd reconciliationCid CloseAfterSettlement with
       closureNote = "Final settlement completed for MPC-001"
 
-  debug "25. Easycoin redeems/burns each active ProfitParticipationHolding"
+  debug "25. Easycoin redeems/burns owner and investor ProfitParticipationHoldings"
+
+  ownerBurnCid <- submit easycoin do
+    exerciseCmd closedCid RedeemHolding with
+      holdingCid = ownerHoldingCid
+      burnReference = "BURN-MPC-001-OWNER"
 
   burn1Cid <- submit easycoin do
     exerciseCmd closedCid RedeemHolding with
@@ -279,36 +294,42 @@ setup = script do
       holdingCid = holding3Cid
       burnReference = "BURN-MPC-001-INVESTOR-003"
 
-  debug "26. Query investor holdings after redemption"
+  debug "26. Query holdings after redemption"
 
+  ownerHoldings <- query @ProfitParticipationHolding owner
   investor1Holdings <- query @ProfitParticipationHolding investor1
   investor2Holdings <- query @ProfitParticipationHolding investor2
   investor3Holdings <- query @ProfitParticipationHolding investor3
 
+  debug ownerHoldings
   debug investor1Holdings
   debug investor2Holdings
   debug investor3Holdings
 
   debug "27. Query reward payment confirmations"
 
+  ownerRewardPayments <- query @RewardPaymentConfirmation owner
   rewardPayments1 <- query @RewardPaymentConfirmation investor1
   rewardPayments2 <- query @RewardPaymentConfirmation investor2
   rewardPayments3 <- query @RewardPaymentConfirmation investor3
 
+  debug ownerRewardPayments
   debug rewardPayments1
   debug rewardPayments2
   debug rewardPayments3
 
   debug "28. Query redemption/burn records"
 
+  ownerRedemptionRecords <- query @TokenRedemptionBurnRecord owner
   redemptionRecords1 <- query @TokenRedemptionBurnRecord investor1
   redemptionRecords2 <- query @TokenRedemptionBurnRecord investor2
   redemptionRecords3 <- query @TokenRedemptionBurnRecord investor3
 
+  debug ownerRedemptionRecords
   debug redemptionRecords1
   debug redemptionRecords2
   debug redemptionRecords3
 
-  debug "Improved POC lifecycle completed successfully."
+  debug "Improved full-contract tokenization POC lifecycle completed successfully."
 
   pure ()

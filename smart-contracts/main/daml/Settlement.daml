@@ -28,27 +28,32 @@ template FinalReconciliation
     ensure
       status == "RECONCILED"
       && totalUnits > 0.0
+      && totalRentalIncome >= 0.0
+      && totalExpenses >= 0.0
       && netProfitBeforeFee == totalRentalIncome - totalExpenses
       && ownerSideDistributableProfit == netProfitBeforeFee - easycoinFee
+      && investorRewardPool >= 0.0
+      && ownerRetainedProfit >= 0.0
       && investorRewardPool + ownerRetainedProfit == ownerSideDistributableProfit
 
     nonconsuming choice CreateRewardRecord : ContractId RewardRecord
       with
-        investor : Party
+        recipient : Party
         holdingCid : ContractId ProfitParticipationHolding
       controller easycoin
       do
         holding <- fetch holdingCid
 
-        assertMsg "Holding belongs to another investor" (holding.holder == investor)
+        assertMsg "Holding belongs to another recipient" (holding.holder == recipient)
         assertMsg "Holding belongs to another contract" (holding.contractId == contractId)
         assertMsg "Holding belongs to another instrument" (holding.instrumentIdText == instrumentId)
         assertMsg "Holding amount cannot exceed total units" (holding.amount <= totalUnits)
+        assertMsg "Holding must be active" (holding.status == "ACTIVE")
 
-        let rewardAmount = (holding.amount / totalUnits) * investorRewardPool
+        let rewardAmount = (holding.amount / totalUnits) * ownerSideDistributableProfit
 
         create RewardRecord with
-          investor
+          recipient
           easycoin
           auditor
           paymentVerifier
@@ -56,7 +61,7 @@ template FinalReconciliation
           instrumentId
           unitsHeld = holding.amount
           totalUnits
-          investorRewardPool
+          ownerSideDistributableProfit
           rewardAmount
           status = "PAYMENT_PENDING"
 
@@ -79,7 +84,7 @@ template FinalReconciliation
 
 template RewardRecord
   with
-    investor : Party
+    recipient : Party
     easycoin : Party
     auditor : Party
     paymentVerifier : Party
@@ -87,18 +92,18 @@ template RewardRecord
     instrumentId : Text
     unitsHeld : Decimal
     totalUnits : Decimal
-    investorRewardPool : Decimal
+    ownerSideDistributableProfit : Decimal
     rewardAmount : Decimal
     status : Text
   where
     signatory easycoin
-    observer investor, auditor, paymentVerifier
+    observer recipient, auditor, paymentVerifier
 
     ensure
       unitsHeld > 0.0
       && totalUnits > 0.0
-      && investorRewardPool >= 0.0
-      && rewardAmount == (unitsHeld / totalUnits) * investorRewardPool
+      && ownerSideDistributableProfit >= 0.0
+      && rewardAmount == (unitsHeld / totalUnits) * ownerSideDistributableProfit
       && status == "PAYMENT_PENDING"
 
     choice ConfirmRewardPayment : ContractId RewardPaymentConfirmation
@@ -107,7 +112,7 @@ template RewardRecord
       controller paymentVerifier
       do
         create RewardPaymentConfirmation with
-          investor
+          recipient
           easycoin
           paymentVerifier
           auditor
@@ -119,7 +124,7 @@ template RewardRecord
 
 template RewardPaymentConfirmation
   with
-    investor : Party
+    recipient : Party
     easycoin : Party
     paymentVerifier : Party
     auditor : Party
@@ -130,7 +135,7 @@ template RewardPaymentConfirmation
     status : Text
   where
     signatory paymentVerifier
-    observer investor, easycoin, auditor
+    observer recipient, easycoin, auditor
 
 template ClosedManagedContract
   with
