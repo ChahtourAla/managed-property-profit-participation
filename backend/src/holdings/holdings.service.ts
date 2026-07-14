@@ -1,10 +1,16 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+import { UserRole } from '../common/enums/user-role.enum';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { DamlClientService } from '../daml/daml-client/daml-client.service';
-import { TEMPLATE_IDS } from '../daml/template-ids';
-import { getDefaultParties } from '../daml/parties';
 import { filterByPath, findByPath } from '../daml/daml.utils';
+import { getDefaultParties } from '../daml/parties';
+import { TEMPLATE_IDS } from '../daml/template-ids';
 
 @Injectable()
 export class HoldingsService {
@@ -13,14 +19,8 @@ export class HoldingsService {
     private readonly configService: ConfigService,
   ) {}
 
-  async getHoldings(party?: string) {
-    const defaultParties = getDefaultParties(this.configService);
-
-    /**
-     * By default we query as Easycoin because Easycoin is signatory
-     * on all ProfitParticipationHolding contracts.
-     */
-    const readerParty = party || defaultParties.easycoin;
+  async getHoldings(user: AuthenticatedUser, party?: string) {
+    const readerParty = this.resolveReaderParty(user, party);
 
     return this.damlClient.queryActiveContracts({
       templateIds: [TEMPLATE_IDS.ProfitParticipationHolding],
@@ -29,31 +29,36 @@ export class HoldingsService {
     });
   }
 
-  async getHoldingsByHolder(holder: string, readerParty?: string) {
-    const defaultParties = getDefaultParties(this.configService);
+  async getHoldingsByHolder(
+    user: AuthenticatedUser,
+    holder: string,
+    readerParty?: string,
+  ) {
+    const canReadOtherHolder = this.canReadOtherParties(user);
 
-    /**
-     * The reader can be:
-     * - the holder himself
-     * - Easycoin
-     * - another observer/signatory party
-     */
-    const party = readerParty || holder || defaultParties.easycoin;
+    const effectiveHolder = canReadOtherHolder
+      ? holder
+      : this.requireUserParty(user);
+
+    const effectiveReaderParty = canReadOtherHolder
+      ? this.resolveReaderParty(user, readerParty)
+      : this.requireUserParty(user);
 
     const holdings = await this.damlClient.queryActiveContracts({
       templateIds: [TEMPLATE_IDS.ProfitParticipationHolding],
-      parties: [party],
+      parties: [effectiveReaderParty],
       limit: 100,
     });
 
-    const holderHoldings = filterByPath(holdings, 'holder', holder);
-
-    return holderHoldings;
+    return filterByPath(holdings, 'holder', effectiveHolder);
   }
 
-  async getHoldingsByInstrument(instrumentId: string, party?: string) {
-    const defaultParties = getDefaultParties(this.configService);
-    const readerParty = party || defaultParties.easycoin;
+  async getHoldingsByInstrument(
+    user: AuthenticatedUser,
+    instrumentId: string,
+    party?: string,
+  ) {
+    const readerParty = this.resolveReaderParty(user, party);
 
     const holdings = await this.damlClient.queryActiveContracts({
       templateIds: [TEMPLATE_IDS.ProfitParticipationHolding],
@@ -61,18 +66,15 @@ export class HoldingsService {
       limit: 100,
     });
 
-    const instrumentHoldings = filterByPath(
-      holdings,
-      'instrumentIdText',
-      instrumentId,
-    );
-
-    return instrumentHoldings;
+    return filterByPath(holdings, 'instrumentIdText', instrumentId);
   }
 
-  async getHoldingByCid(holdingCid: string, party?: string) {
-    const defaultParties = getDefaultParties(this.configService);
-    const readerParty = party || defaultParties.easycoin;
+  async getHoldingByCid(
+    user: AuthenticatedUser,
+    holdingCid: string,
+    party?: string,
+  ) {
+    const readerParty = this.resolveReaderParty(user, party);
 
     const holdings = await this.damlClient.queryActiveContracts({
       templateIds: [TEMPLATE_IDS.ProfitParticipationHolding],
@@ -82,10 +84,6 @@ export class HoldingsService {
 
     const holding = findByPath(holdings, 'contractId', holdingCid);
 
-    /**
-     * Sometimes contractId is not inside createArguments,
-     * it is at the top level of the created event.
-     */
     const matchingHolding =
       holding || holdings.find((item) => item.contractId === holdingCid);
 
@@ -97,5 +95,51 @@ export class HoldingsService {
     }
 
     return matchingHolding;
+  }
+
+  private resolveReaderParty(
+    user: AuthenticatedUser,
+    requestedParty?: string,
+  ): string {
+    const defaultParties = getDefaultParties(this.configService);
+
+    const canUseRequestedParty =
+      user.role === UserRole.ADMIN || user.role === UserRole.EASYCOIN;
+
+    if (canUseRequestedParty && requestedParty) {
+      return requestedParty;
+    }
+
+    if (user.partyId) {
+      return user.partyId;
+    }
+
+    if (user.role === UserRole.ADMIN) {
+      return defaultParties.easycoin;
+    }
+
+    throw new BadRequestException(
+      'Authenticated user does not have a linked Daml partyId',
+    );
+  }
+
+  private requireUserParty(user: AuthenticatedUser): string {
+    if (!user.partyId) {
+      throw new BadRequestException(
+        'Authenticated user does not have a linked Daml partyId',
+      );
+    }
+
+    return user.partyId;
+  }
+
+  private canReadOtherParties(user: AuthenticatedUser): boolean {
+    return [
+      UserRole.ADMIN,
+      UserRole.EASYCOIN,
+      UserRole.AUDITOR,
+      UserRole.LEGAL_ADMIN,
+      UserRole.PAYMENT_VERIFIER,
+    ].includes(user.role);
   }
 }

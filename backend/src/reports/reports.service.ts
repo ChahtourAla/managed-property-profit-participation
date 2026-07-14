@@ -1,13 +1,19 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+import { UserRole } from '../common/enums/user-role.enum';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { DamlClientService } from '../daml/daml-client/daml-client.service';
-import { TEMPLATE_IDS } from '../daml/template-ids';
-import { getDefaultParties } from '../daml/parties';
 import { filterByPath, findByPath, toDamlDecimal } from '../daml/daml.utils';
+import { getDefaultParties } from '../daml/parties';
+import { TEMPLATE_IDS } from '../daml/template-ids';
 
-import { CreatePerformanceReportDto } from './dto/create-performance-report.dto';
 import { AcceptReportDto } from './dto/accept-report.dto';
+import { CreatePerformanceReportDto } from './dto/create-performance-report.dto';
 
 @Injectable()
 export class ReportsService {
@@ -16,9 +22,17 @@ export class ReportsService {
     private readonly configService: ConfigService,
   ) {}
 
-  async createPerformanceReport(dto: CreatePerformanceReportDto) {
-    const defaultParties = getDefaultParties(this.configService);
-    const easycoin = dto.easycoin || defaultParties.easycoin;
+  async createPerformanceReport(
+    user: AuthenticatedUser,
+    dto: CreatePerformanceReportDto,
+  ) {
+    if (!user.partyId) {
+      throw new BadRequestException(
+        'Authenticated Easycoin user does not have a linked Daml partyId',
+      );
+    }
+
+    const easycoin = user.partyId;
 
     const instruments = await this.damlClient.queryActiveContracts({
       templateIds: [TEMPLATE_IDS.TokenizedInstrument],
@@ -34,7 +48,7 @@ export class ReportsService {
 
     if (!instrument) {
       throw new NotFoundException({
-        message: 'TokenizedInstrument not found',
+        message: 'Tokenized instrument not found',
         instrumentId: dto.instrumentId,
       });
     }
@@ -56,9 +70,48 @@ export class ReportsService {
     });
   }
 
-  async acceptReport(reportCid: string, dto: AcceptReportDto) {
-    const defaultParties = getDefaultParties(this.configService);
-    const auditor = dto.auditor || defaultParties.auditor;
+  async getReports(user: AuthenticatedUser, party?: string) {
+    const readerParty = this.resolveReaderParty(user, party);
+
+    return this.damlClient.queryActiveContracts({
+      templateIds: [TEMPLATE_IDS.PerformanceReport],
+      parties: [readerParty],
+      limit: 100,
+    });
+  }
+
+  async getAcceptedReports(user: AuthenticatedUser, party?: string) {
+    const readerParty = this.resolveReaderParty(user, party);
+
+    return this.damlClient.queryActiveContracts({
+      templateIds: [TEMPLATE_IDS.ReportAccepted],
+      parties: [readerParty],
+      limit: 100,
+    });
+  }
+
+  async getReportsByInstrument(
+    user: AuthenticatedUser,
+    instrumentId: string,
+    party?: string,
+  ) {
+    const reports = await this.getReports(user, party);
+
+    return filterByPath(reports, 'instrumentId', instrumentId);
+  }
+
+  async acceptReport(
+    user: AuthenticatedUser,
+    reportCid: string,
+    _dto: AcceptReportDto,
+  ) {
+    if (!user.partyId) {
+      throw new BadRequestException(
+        'Authenticated auditor user does not have a linked Daml partyId',
+      );
+    }
+
+    const auditor = user.partyId;
 
     const reports = await this.damlClient.queryActiveContracts({
       templateIds: [TEMPLATE_IDS.PerformanceReport],
@@ -78,44 +131,35 @@ export class ReportsService {
     return this.damlClient.exerciseChoice({
       templateId: TEMPLATE_IDS.PerformanceReport,
       contractId: reportCid,
-      choice: 'AuditorAcceptReport',
+      choice: 'AcceptReport',
       argument: {},
       actAs: [auditor],
     });
   }
 
-  async getReportsByInstrument(instrumentId: string, party?: string) {
+  private resolveReaderParty(
+    user: AuthenticatedUser,
+    requestedParty?: string,
+  ): string {
     const defaultParties = getDefaultParties(this.configService);
-    const readerParty = party || defaultParties.easycoin;
 
-    const reports = await this.damlClient.queryActiveContracts({
-      templateIds: [TEMPLATE_IDS.PerformanceReport],
-      parties: [readerParty],
-      limit: 100,
-    });
+    const canUseRequestedParty =
+      user.role === UserRole.ADMIN || user.role === UserRole.EASYCOIN;
 
-    return filterByPath(reports, 'instrumentId', instrumentId);
-  }
+    if (canUseRequestedParty && requestedParty) {
+      return requestedParty;
+    }
 
-  async getReports(party?: string) {
-    const defaultParties = getDefaultParties(this.configService);
-    const readerParty = party || defaultParties.easycoin;
+    if (user.partyId) {
+      return user.partyId;
+    }
 
-    return this.damlClient.queryActiveContracts({
-      templateIds: [TEMPLATE_IDS.PerformanceReport],
-      parties: [readerParty],
-      limit: 100,
-    });
-  }
+    if (user.role === UserRole.ADMIN) {
+      return defaultParties.easycoin;
+    }
 
-  async getAcceptedReports(party?: string) {
-    const defaultParties = getDefaultParties(this.configService);
-    const readerParty = party || defaultParties.auditor;
-
-    return this.damlClient.queryActiveContracts({
-      templateIds: [TEMPLATE_IDS.ReportAccepted],
-      parties: [readerParty],
-      limit: 100,
-    });
+    throw new BadRequestException(
+      'Authenticated user does not have a linked Daml partyId',
+    );
   }
 }

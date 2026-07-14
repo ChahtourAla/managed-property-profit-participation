@@ -1,14 +1,20 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+import { UserRole } from '../common/enums/user-role.enum';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { DamlClientService } from '../daml/daml-client/daml-client.service';
-import { TEMPLATE_IDS } from '../daml/template-ids';
-import { getDefaultParties } from '../daml/parties';
 import { findByPath, toDamlDecimal } from '../daml/daml.utils';
+import { getDefaultParties } from '../daml/parties';
+import { TEMPLATE_IDS } from '../daml/template-ids';
 
 import { CreateOwnerDraftDto } from './dto/create-owner-draft.dto';
-import { ValidateContractDto } from './dto/validate-contract.dto';
 import { RejectContractDto } from './dto/reject-contract.dto';
+import { ValidateContractDto } from './dto/validate-contract.dto';
 
 @Injectable()
 export class ContractsService {
@@ -17,65 +23,54 @@ export class ContractsService {
     private readonly configService: ConfigService,
   ) {}
 
-  async createOwnerDraft(dto: CreateOwnerDraftDto) {
+  async createOwnerDraft(user: AuthenticatedUser, dto: CreateOwnerDraftDto) {
     const defaultParties = getDefaultParties(this.configService);
 
-    const owner = dto.owner || defaultParties.owner;
-    const easycoin = dto.easycoin || defaultParties.easycoin;
-    const legalAdmin = dto.legalAdmin || defaultParties.legalAdmin;
-    const auditor = dto.auditor || defaultParties.auditor;
-    const paymentVerifier =
-      dto.paymentVerifier || defaultParties.paymentVerifier;
-
-    const payload = {
-      owner,
-      easycoin,
-      legalAdmin,
-      auditor,
-      paymentVerifier,
-      contractData: {
-        contractId: dto.contractId,
-        propertyId: dto.propertyId,
-        propertyName: dto.propertyName,
-        financialPeriod: dto.financialPeriod,
-        expectedRentalIncome: toDamlDecimal(dto.expectedRentalIncome),
-        expectedExpenses: toDamlDecimal(dto.expectedExpenses),
-        reportFrequency: dto.reportFrequency,
-      },
-      terms: {
-        easycoinFeeRate: toDamlDecimal(dto.easycoinFeeRate),
-        ownerProfitShareOffered: toDamlDecimal(dto.ownerProfitShareOffered),
-        ownerRetainedShare: toDamlDecimal(dto.ownerRetainedShare),
-        expectedInvestorSettlement: toDamlDecimal(
-          dto.expectedInvestorSettlement,
-        ),
-        expectedUpfrontFunding: toDamlDecimal(dto.expectedUpfrontFunding),
-        currency: dto.currency,
-      },
-    };
+    const ownerParty = this.requireUserParty(
+      user,
+      'Authenticated owner user does not have a linked Daml partyId',
+    );
 
     return this.damlClient.createContract({
       templateId: TEMPLATE_IDS.OwnerSubmittedManagedContractDraft,
-      payload,
-      actAs: [owner],
-      readAs: [easycoin, legalAdmin, auditor, paymentVerifier],
+      payload: {
+        owner: ownerParty,
+        easycoin: defaultParties.easycoin,
+        legalAdmin: defaultParties.legalAdmin,
+        auditor: defaultParties.auditor,
+        paymentVerifier: defaultParties.paymentVerifier,
+        contractData: {
+          contractId: dto.contractId,
+          propertyId: dto.propertyId,
+          propertyName: dto.propertyName,
+          financialPeriod: dto.financialPeriod,
+        },
+        terms: {
+          expectedRentalIncome: toDamlDecimal(dto.expectedRentalIncome),
+          expectedExpenses: toDamlDecimal(dto.expectedExpenses),
+          reportFrequency: dto.reportFrequency,
+          easycoinFeeRate: toDamlDecimal(dto.easycoinFeeRate),
+          ownerProfitShareOffered: toDamlDecimal(dto.ownerProfitShareOffered),
+          ownerRetainedShare: toDamlDecimal(dto.ownerRetainedShare),
+          expectedInvestorSettlement: toDamlDecimal(
+            dto.expectedInvestorSettlement,
+          ),
+          expectedUpfrontFunding: toDamlDecimal(dto.expectedUpfrontFunding),
+          currency: dto.currency,
+        },
+      },
+      actAs: [ownerParty],
     });
   }
 
-  async getOwnerDrafts(party?: string) {
-    const defaultParties = getDefaultParties(this.configService);
-    const readerParty = party || defaultParties.easycoin;
+  async getOwnerDrafts(user: AuthenticatedUser, party?: string) {
+    const readerParty = this.resolveReaderParty(user, party);
 
-    return this.damlClient.queryActiveContracts({
-      templateIds: [TEMPLATE_IDS.OwnerSubmittedManagedContractDraft],
-      parties: [readerParty],
-      limit: 100,
-    });
+    return this.queryOwnerDraftsByParty(readerParty);
   }
 
-  async getValidatedContracts(party?: string) {
-    const defaultParties = getDefaultParties(this.configService);
-    const readerParty = party || defaultParties.easycoin;
+  async getValidatedContracts(user: AuthenticatedUser, party?: string) {
+    const readerParty = this.resolveReaderParty(user, party);
 
     return this.damlClient.queryActiveContracts({
       templateIds: [TEMPLATE_IDS.ValidatedManagedContract],
@@ -84,11 +79,17 @@ export class ContractsService {
     });
   }
 
-  async validateContract(businessContractId: string, dto: ValidateContractDto) {
-    const defaultParties = getDefaultParties(this.configService);
-    const easycoin = dto.easycoin || defaultParties.easycoin;
+  async validateContract(
+    user: AuthenticatedUser,
+    businessContractId: string,
+    _dto: ValidateContractDto,
+  ) {
+    const easycoin = this.requireUserParty(
+      user,
+      'Authenticated Easycoin user does not have a linked Daml partyId',
+    );
 
-    const drafts = await this.getOwnerDrafts(easycoin);
+    const drafts = await this.queryOwnerDraftsByParty(easycoin);
 
     const draft = findByPath(
       drafts,
@@ -112,11 +113,17 @@ export class ContractsService {
     });
   }
 
-  async rejectContract(businessContractId: string, dto: RejectContractDto) {
-    const defaultParties = getDefaultParties(this.configService);
-    const easycoin = dto.easycoin || defaultParties.easycoin;
+  async rejectContract(
+    user: AuthenticatedUser,
+    businessContractId: string,
+    dto: RejectContractDto,
+  ) {
+    const easycoin = this.requireUserParty(
+      user,
+      'Authenticated Easycoin user does not have a linked Daml partyId',
+    );
 
-    const drafts = await this.getOwnerDrafts(easycoin);
+    const drafts = await this.queryOwnerDraftsByParty(easycoin);
 
     const draft = findByPath(
       drafts,
@@ -140,5 +147,47 @@ export class ContractsService {
       },
       actAs: [easycoin],
     });
+  }
+
+  private async queryOwnerDraftsByParty(party: string) {
+    return this.damlClient.queryActiveContracts({
+      templateIds: [TEMPLATE_IDS.OwnerSubmittedManagedContractDraft],
+      parties: [party],
+      limit: 100,
+    });
+  }
+
+  private resolveReaderParty(
+    user: AuthenticatedUser,
+    requestedParty?: string,
+  ): string {
+    const defaultParties = getDefaultParties(this.configService);
+
+    const canUseRequestedParty =
+      user.role === UserRole.ADMIN || user.role === UserRole.EASYCOIN;
+
+    if (canUseRequestedParty && requestedParty) {
+      return requestedParty;
+    }
+
+    if (user.partyId) {
+      return user.partyId;
+    }
+
+    if (user.role === UserRole.ADMIN) {
+      return defaultParties.easycoin;
+    }
+
+    throw new BadRequestException(
+      'Authenticated user does not have a linked Daml partyId',
+    );
+  }
+
+  private requireUserParty(user: AuthenticatedUser, errorMessage: string) {
+    if (!user.partyId) {
+      throw new BadRequestException(errorMessage);
+    }
+
+    return user.partyId;
   }
 }

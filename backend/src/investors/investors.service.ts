@@ -1,9 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+import { UserRole } from '../common/enums/user-role.enum';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { DamlClientService } from '../daml/daml-client/daml-client.service';
-import { TEMPLATE_IDS } from '../daml/template-ids';
 import { getDefaultParties } from '../daml/parties';
+import { TEMPLATE_IDS } from '../daml/template-ids';
 
 import { ApproveInvestorDto } from './dto/approve-investor.dto';
 
@@ -14,35 +16,67 @@ export class InvestorsService {
     private readonly configService: ConfigService,
   ) {}
 
-  async approveInvestor(dto: ApproveInvestorDto) {
+  async approveInvestor(user: AuthenticatedUser, dto: ApproveInvestorDto) {
     const defaultParties = getDefaultParties(this.configService);
 
-    const easycoin = dto.easycoin || defaultParties.easycoin;
-    const legalAdmin = dto.legalAdmin || defaultParties.legalAdmin;
-
-    const payload = {
-      easycoin,
-      legalAdmin,
-      investor: dto.investor,
-      approvalReference: dto.approvalReference,
-    };
+    const easycoin = this.requireUserParty(
+      user,
+      'Authenticated Easycoin user does not have a linked Daml partyId',
+    );
 
     return this.damlClient.createContract({
       templateId: TEMPLATE_IDS.ApprovedInvestor,
-      payload,
+      payload: {
+        easycoin,
+        legalAdmin: defaultParties.legalAdmin,
+        investor: dto.investor,
+        approvalReference: dto.approvalReference,
+      },
       actAs: [easycoin],
-      readAs: [legalAdmin, dto.investor],
     });
   }
 
-  async getApprovedInvestors(party?: string) {
-    const defaultParties = getDefaultParties(this.configService);
-    const readerParty = party || defaultParties.easycoin;
+  async getApprovedInvestors(user: AuthenticatedUser, party?: string) {
+    const readerParty = this.resolveReaderParty(user, party);
 
     return this.damlClient.queryActiveContracts({
       templateIds: [TEMPLATE_IDS.ApprovedInvestor],
       parties: [readerParty],
       limit: 100,
     });
+  }
+
+  private resolveReaderParty(
+    user: AuthenticatedUser,
+    requestedParty?: string,
+  ): string {
+    const defaultParties = getDefaultParties(this.configService);
+
+    const canUseRequestedParty =
+      user.role === UserRole.ADMIN || user.role === UserRole.EASYCOIN;
+
+    if (canUseRequestedParty && requestedParty) {
+      return requestedParty;
+    }
+
+    if (user.partyId) {
+      return user.partyId;
+    }
+
+    if (user.role === UserRole.ADMIN) {
+      return defaultParties.easycoin;
+    }
+
+    throw new BadRequestException(
+      'Authenticated user does not have a linked Daml partyId',
+    );
+  }
+
+  private requireUserParty(user: AuthenticatedUser, errorMessage: string) {
+    if (!user.partyId) {
+      throw new BadRequestException(errorMessage);
+    }
+
+    return user.partyId;
   }
 }

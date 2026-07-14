@@ -1,14 +1,20 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+import { UserRole } from '../common/enums/user-role.enum';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { DamlClientService } from '../daml/daml-client/daml-client.service';
 import { DamlCommand, DamlCreatedEvent } from '../daml/daml.types';
-import { TEMPLATE_IDS } from '../daml/template-ids';
-import { getDefaultParties } from '../daml/parties';
 import { filterByPath, getNestedValue } from '../daml/daml.utils';
+import { getDefaultParties } from '../daml/parties';
+import { TEMPLATE_IDS } from '../daml/template-ids';
 
-import { RedeemHoldingDto } from './dto/redeem-holding.dto';
 import { RedeemAllHoldingsDto } from './dto/redeem-all-holdings.dto';
+import { RedeemHoldingDto } from './dto/redeem-holding.dto';
 
 @Injectable()
 export class RedemptionsService {
@@ -17,9 +23,15 @@ export class RedemptionsService {
     private readonly configService: ConfigService,
   ) {}
 
-  async redeemHolding(closedCid: string, dto: RedeemHoldingDto) {
-    const defaultParties = getDefaultParties(this.configService);
-    const easycoin = dto.easycoin || defaultParties.easycoin;
+  async redeemHolding(
+    user: AuthenticatedUser,
+    closedCid: string,
+    dto: RedeemHoldingDto,
+  ) {
+    const easycoin = this.requireUserParty(
+      user,
+      'Authenticated Easycoin user does not have a linked Daml partyId',
+    );
 
     await this.findClosedContractByCid(closedCid, easycoin);
     await this.findHoldingByCid(dto.holdingCid, easycoin);
@@ -36,9 +48,15 @@ export class RedemptionsService {
     });
   }
 
-  async redeemAllHoldings(closedCid: string, dto: RedeemAllHoldingsDto) {
-    const defaultParties = getDefaultParties(this.configService);
-    const easycoin = dto.easycoin || defaultParties.easycoin;
+  async redeemAllHoldings(
+    user: AuthenticatedUser,
+    closedCid: string,
+    dto: RedeemAllHoldingsDto,
+  ) {
+    const easycoin = this.requireUserParty(
+      user,
+      'Authenticated Easycoin user does not have a linked Daml partyId',
+    );
 
     const closedContract = await this.findClosedContractByCid(
       closedCid,
@@ -99,9 +117,8 @@ export class RedemptionsService {
     });
   }
 
-  async getRedemptionRecords(party?: string) {
-    const defaultParties = getDefaultParties(this.configService);
-    const readerParty = party || defaultParties.easycoin;
+  async getRedemptionRecords(user: AuthenticatedUser, party?: string) {
+    const readerParty = this.resolveReaderParty(user, party);
 
     return this.damlClient.queryActiveContracts({
       templateIds: [TEMPLATE_IDS.TokenRedemptionBurnRecord],
@@ -110,8 +127,12 @@ export class RedemptionsService {
     });
   }
 
-  async getRedemptionRecordsByInstrument(instrumentId: string, party?: string) {
-    const records = await this.getRedemptionRecords(party);
+  async getRedemptionRecordsByInstrument(
+    user: AuthenticatedUser,
+    instrumentId: string,
+    party?: string,
+  ) {
+    const records = await this.getRedemptionRecords(user, party);
 
     return filterByPath(records, 'instrumentId', instrumentId);
   }
@@ -173,5 +194,39 @@ export class RedemptionsService {
     });
 
     return filterByPath(holdings, 'instrumentIdText', instrumentId);
+  }
+
+  private resolveReaderParty(
+    user: AuthenticatedUser,
+    requestedParty?: string,
+  ): string {
+    const defaultParties = getDefaultParties(this.configService);
+
+    const canUseRequestedParty =
+      user.role === UserRole.ADMIN || user.role === UserRole.EASYCOIN;
+
+    if (canUseRequestedParty && requestedParty) {
+      return requestedParty;
+    }
+
+    if (user.partyId) {
+      return user.partyId;
+    }
+
+    if (user.role === UserRole.ADMIN) {
+      return defaultParties.easycoin;
+    }
+
+    throw new BadRequestException(
+      'Authenticated user does not have a linked Daml partyId',
+    );
+  }
+
+  private requireUserParty(user: AuthenticatedUser, errorMessage: string) {
+    if (!user.partyId) {
+      throw new BadRequestException(errorMessage);
+    }
+
+    return user.partyId;
   }
 }

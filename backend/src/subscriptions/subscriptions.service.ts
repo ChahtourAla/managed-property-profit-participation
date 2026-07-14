@@ -1,13 +1,19 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+import { UserRole } from '../common/enums/user-role.enum';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { DamlClientService } from '../daml/daml-client/daml-client.service';
-import { TEMPLATE_IDS } from '../daml/template-ids';
-import { getDefaultParties } from '../daml/parties';
 import { findByPath, getNestedValue, toDamlDecimal } from '../daml/daml.utils';
+import { getDefaultParties } from '../daml/parties';
+import { TEMPLATE_IDS } from '../daml/template-ids';
 
-import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { ConfirmFundingDto } from './dto/confirm-funding.dto';
+import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 
 @Injectable()
 export class SubscriptionsService {
@@ -16,10 +22,20 @@ export class SubscriptionsService {
     private readonly configService: ConfigService,
   ) {}
 
-  async createSubscription(dto: CreateSubscriptionDto) {
+  async createSubscription(
+    user: AuthenticatedUser,
+    dto: CreateSubscriptionDto,
+  ) {
     const defaultParties = getDefaultParties(this.configService);
-    const easycoin = dto.easycoin || defaultParties.easycoin;
-    const investor = dto.investor;
+
+    if (!user.partyId) {
+      throw new BadRequestException(
+        'Authenticated investor user does not have a linked Daml partyId',
+      );
+    }
+
+    const easycoin = defaultParties.easycoin;
+    const investor = user.partyId;
 
     const instruments = await this.damlClient.queryActiveContracts({
       templateIds: [TEMPLATE_IDS.TokenizedInstrument],
@@ -53,6 +69,7 @@ export class SubscriptionsService {
         approval.createArguments,
         'investor',
       );
+
       const approvalEasycoin = getNestedValue(
         approval.createArguments,
         'easycoin',
@@ -84,12 +101,21 @@ export class SubscriptionsService {
     });
   }
 
-  async confirmFunding(subscriptionCid: string, dto: ConfirmFundingDto) {
+  async confirmFunding(
+    user: AuthenticatedUser,
+    subscriptionCid: string,
+    dto: ConfirmFundingDto,
+  ) {
     const defaultParties = getDefaultParties(this.configService);
 
-    const easycoin = dto.easycoin || defaultParties.easycoin;
-    const paymentVerifier =
-      dto.paymentVerifier || defaultParties.paymentVerifier;
+    if (!user.partyId) {
+      throw new BadRequestException(
+        'Authenticated payment verifier user does not have a linked Daml partyId',
+      );
+    }
+
+    const easycoin = defaultParties.easycoin;
+    const paymentVerifier = user.partyId;
 
     const subscriptions = await this.damlClient.queryActiveContracts({
       templateIds: [TEMPLATE_IDS.InvestorSubscription],
@@ -135,9 +161,8 @@ export class SubscriptionsService {
     });
   }
 
-  async getSubscriptions(party?: string) {
-    const defaultParties = getDefaultParties(this.configService);
-    const readerParty = party || defaultParties.easycoin;
+  async getSubscriptions(user: AuthenticatedUser, party?: string) {
+    const readerParty = this.resolveReaderParty(user, party);
 
     return this.damlClient.queryActiveContracts({
       templateIds: [TEMPLATE_IDS.InvestorSubscription],
@@ -146,9 +171,8 @@ export class SubscriptionsService {
     });
   }
 
-  async getFundingConfirmations(party?: string) {
-    const defaultParties = getDefaultParties(this.configService);
-    const readerParty = party || defaultParties.easycoin;
+  async getFundingConfirmations(user: AuthenticatedUser, party?: string) {
+    const readerParty = this.resolveReaderParty(user, party);
 
     return this.damlClient.queryActiveContracts({
       templateIds: [TEMPLATE_IDS.FundingConfirmation],
@@ -177,5 +201,31 @@ export class SubscriptionsService {
     }
 
     return supply.contractId;
+  }
+
+  private resolveReaderParty(
+    user: AuthenticatedUser,
+    requestedParty?: string,
+  ): string {
+    const defaultParties = getDefaultParties(this.configService);
+
+    const canUseRequestedParty =
+      user.role === UserRole.ADMIN || user.role === UserRole.EASYCOIN;
+
+    if (canUseRequestedParty && requestedParty) {
+      return requestedParty;
+    }
+
+    if (user.partyId) {
+      return user.partyId;
+    }
+
+    if (user.role === UserRole.ADMIN) {
+      return defaultParties.easycoin;
+    }
+
+    throw new BadRequestException(
+      'Authenticated user does not have a linked Daml partyId',
+    );
   }
 }

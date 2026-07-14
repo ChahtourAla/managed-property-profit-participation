@@ -1,20 +1,26 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+import { UserRole } from '../common/enums/user-role.enum';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { DamlClientService } from '../daml/daml-client/daml-client.service';
 import { DamlCommand, DamlCreatedEvent } from '../daml/daml.types';
-import { TEMPLATE_IDS } from '../daml/template-ids';
-import { getDefaultParties } from '../daml/parties';
 import {
   filterByPath,
   findByPath,
   getNestedValue,
   toDamlDecimal,
 } from '../daml/daml.utils';
+import { getDefaultParties } from '../daml/parties';
+import { TEMPLATE_IDS } from '../daml/template-ids';
 
-import { SubmitFinalReconciliationDto } from './dto/submit-final-reconciliation.dto';
-import { CreateRewardRecordsDto } from './dto/create-reward-records.dto';
 import { CloseSettlementDto } from './dto/close-settlement.dto';
+import { CreateRewardRecordsDto } from './dto/create-reward-records.dto';
+import { SubmitFinalReconciliationDto } from './dto/submit-final-reconciliation.dto';
 
 @Injectable()
 export class SettlementsService {
@@ -23,9 +29,14 @@ export class SettlementsService {
     private readonly configService: ConfigService,
   ) {}
 
-  async submitFinalReconciliation(dto: SubmitFinalReconciliationDto) {
-    const defaultParties = getDefaultParties(this.configService);
-    const easycoin = dto.easycoin || defaultParties.easycoin;
+  async submitFinalReconciliation(
+    user: AuthenticatedUser,
+    dto: SubmitFinalReconciliationDto,
+  ) {
+    const easycoin = this.requireUserParty(
+      user,
+      'Authenticated Easycoin user does not have a linked Daml partyId',
+    );
 
     const instruments = await this.damlClient.queryActiveContracts({
       templateIds: [TEMPLATE_IDS.TokenizedInstrument],
@@ -67,11 +78,14 @@ export class SettlementsService {
   }
 
   async createRewardRecords(
+    user: AuthenticatedUser,
     reconciliationCid: string,
     dto: CreateRewardRecordsDto,
   ) {
-    const defaultParties = getDefaultParties(this.configService);
-    const easycoin = dto.easycoin || defaultParties.easycoin;
+    const easycoin = this.requireUserParty(
+      user,
+      'Authenticated Easycoin user does not have a linked Daml partyId',
+    );
 
     const reconciliation = await this.findReconciliationByCid(
       reconciliationCid,
@@ -134,9 +148,15 @@ export class SettlementsService {
     });
   }
 
-  async closeSettlement(reconciliationCid: string, dto: CloseSettlementDto) {
-    const defaultParties = getDefaultParties(this.configService);
-    const easycoin = dto.easycoin || defaultParties.easycoin;
+  async closeSettlement(
+    user: AuthenticatedUser,
+    reconciliationCid: string,
+    dto: CloseSettlementDto,
+  ) {
+    const easycoin = this.requireUserParty(
+      user,
+      'Authenticated Easycoin user does not have a linked Daml partyId',
+    );
 
     await this.findReconciliationByCid(reconciliationCid, easycoin);
 
@@ -151,9 +171,8 @@ export class SettlementsService {
     });
   }
 
-  async getSettlements(party?: string) {
-    const defaultParties = getDefaultParties(this.configService);
-    const readerParty = party || defaultParties.easycoin;
+  async getSettlements(user: AuthenticatedUser, party?: string) {
+    const readerParty = this.resolveReaderParty(user, party);
 
     return this.damlClient.queryActiveContracts({
       templateIds: [TEMPLATE_IDS.FinalReconciliation],
@@ -162,9 +181,8 @@ export class SettlementsService {
     });
   }
 
-  async getRewardRecords(party?: string) {
-    const defaultParties = getDefaultParties(this.configService);
-    const readerParty = party || defaultParties.easycoin;
+  async getRewardRecords(user: AuthenticatedUser, party?: string) {
+    const readerParty = this.resolveReaderParty(user, party);
 
     return this.damlClient.queryActiveContracts({
       templateIds: [TEMPLATE_IDS.RewardRecord],
@@ -173,9 +191,8 @@ export class SettlementsService {
     });
   }
 
-  async getClosedContracts(party?: string) {
-    const defaultParties = getDefaultParties(this.configService);
-    const readerParty = party || defaultParties.easycoin;
+  async getClosedContracts(user: AuthenticatedUser, party?: string) {
+    const readerParty = this.resolveReaderParty(user, party);
 
     return this.damlClient.queryActiveContracts({
       templateIds: [TEMPLATE_IDS.ClosedManagedContract],
@@ -232,5 +249,39 @@ export class SettlementsService {
     return instrumentHoldings.filter((holding) =>
       params.holdingCids?.includes(holding.contractId),
     );
+  }
+
+  private resolveReaderParty(
+    user: AuthenticatedUser,
+    requestedParty?: string,
+  ): string {
+    const defaultParties = getDefaultParties(this.configService);
+
+    const canUseRequestedParty =
+      user.role === UserRole.ADMIN || user.role === UserRole.EASYCOIN;
+
+    if (canUseRequestedParty && requestedParty) {
+      return requestedParty;
+    }
+
+    if (user.partyId) {
+      return user.partyId;
+    }
+
+    if (user.role === UserRole.ADMIN) {
+      return defaultParties.easycoin;
+    }
+
+    throw new BadRequestException(
+      'Authenticated user does not have a linked Daml partyId',
+    );
+  }
+
+  private requireUserParty(user: AuthenticatedUser, errorMessage: string) {
+    if (!user.partyId) {
+      throw new BadRequestException(errorMessage);
+    }
+
+    return user.partyId;
   }
 }

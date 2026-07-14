@@ -1,10 +1,15 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+import { UserRole } from '../common/enums/user-role.enum';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { DamlClientService } from '../daml/daml-client/daml-client.service';
-import { TEMPLATE_IDS } from '../daml/template-ids';
 import { getDefaultParties } from '../daml/parties';
-
+import { TEMPLATE_IDS } from '../daml/template-ids';
 import { ConfirmRewardPaymentDto } from './dto/confirm-reward-payment.dto';
 
 @Injectable()
@@ -14,22 +19,45 @@ export class PaymentsService {
     private readonly configService: ConfigService,
   ) {}
 
-  async confirmRewardPayment(rewardCid: string, dto: ConfirmRewardPaymentDto) {
-    const defaultParties = getDefaultParties(this.configService);
-    const paymentVerifier =
-      dto.paymentVerifier || defaultParties.paymentVerifier;
+  async getRewardRecords(user: AuthenticatedUser, party?: string) {
+    const readerParty = this.resolveReaderParty(user, party);
 
-    const rewardRecords = await this.damlClient.queryActiveContracts({
+    return this.damlClient.queryActiveContracts({
+      templateIds: [TEMPLATE_IDS.RewardRecord],
+      parties: [readerParty],
+      limit: 100,
+    });
+  }
+
+  async getRewardPaymentConfirmations(user: AuthenticatedUser, party?: string) {
+    const readerParty = this.resolveReaderParty(user, party);
+
+    return this.damlClient.queryActiveContracts({
+      templateIds: [TEMPLATE_IDS.RewardPaymentConfirmation],
+      parties: [readerParty],
+      limit: 100,
+    });
+  }
+
+  async confirmRewardPayment(
+    user: AuthenticatedUser,
+    rewardCid: string,
+    dto: ConfirmRewardPaymentDto,
+  ) {
+    const paymentVerifier = this.requireUserParty(
+      user,
+      'Authenticated payment verifier user does not have a linked Daml partyId',
+    );
+
+    const rewards = await this.damlClient.queryActiveContracts({
       templateIds: [TEMPLATE_IDS.RewardRecord],
       parties: [paymentVerifier],
       limit: 100,
     });
 
-    const rewardRecord = rewardRecords.find(
-      (item) => item.contractId === rewardCid,
-    );
+    const reward = rewards.find((item) => item.contractId === rewardCid);
 
-    if (!rewardRecord) {
+    if (!reward) {
       throw new NotFoundException({
         message: 'RewardRecord not found',
         rewardCid,
@@ -47,25 +75,37 @@ export class PaymentsService {
     });
   }
 
-  async getRewardRecords(party?: string) {
+  private resolveReaderParty(
+    user: AuthenticatedUser,
+    requestedParty?: string,
+  ): string {
     const defaultParties = getDefaultParties(this.configService);
-    const readerParty = party || defaultParties.paymentVerifier;
 
-    return this.damlClient.queryActiveContracts({
-      templateIds: [TEMPLATE_IDS.RewardRecord],
-      parties: [readerParty],
-      limit: 100,
-    });
+    const canUseRequestedParty =
+      user.role === UserRole.ADMIN || user.role === UserRole.EASYCOIN;
+
+    if (canUseRequestedParty && requestedParty) {
+      return requestedParty;
+    }
+
+    if (user.partyId) {
+      return user.partyId;
+    }
+
+    if (user.role === UserRole.ADMIN) {
+      return defaultParties.easycoin;
+    }
+
+    throw new BadRequestException(
+      'Authenticated user does not have a linked Daml partyId',
+    );
   }
 
-  async getRewardPaymentConfirmations(party?: string) {
-    const defaultParties = getDefaultParties(this.configService);
-    const readerParty = party || defaultParties.paymentVerifier;
+  private requireUserParty(user: AuthenticatedUser, errorMessage: string) {
+    if (!user.partyId) {
+      throw new BadRequestException(errorMessage);
+    }
 
-    return this.damlClient.queryActiveContracts({
-      templateIds: [TEMPLATE_IDS.RewardPaymentConfirmation],
-      parties: [readerParty],
-      limit: 100,
-    });
+    return user.partyId;
   }
 }

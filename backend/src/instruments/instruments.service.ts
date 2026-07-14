@@ -1,10 +1,16 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+import { UserRole } from '../common/enums/user-role.enum';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { DamlClientService } from '../daml/daml-client/daml-client.service';
-import { TEMPLATE_IDS } from '../daml/template-ids';
-import { getDefaultParties } from '../daml/parties';
 import { filterByPath, findByPath, toDamlDecimal } from '../daml/daml.utils';
+import { getDefaultParties } from '../daml/parties';
+import { TEMPLATE_IDS } from '../daml/template-ids';
 
 import { CreateInstrumentDto } from './dto/create-instrument.dto';
 
@@ -15,9 +21,11 @@ export class InstrumentsService {
     private readonly configService: ConfigService,
   ) {}
 
-  async createInstrument(dto: CreateInstrumentDto) {
-    const defaultParties = getDefaultParties(this.configService);
-    const easycoin = dto.easycoin || defaultParties.easycoin;
+  async createInstrument(user: AuthenticatedUser, dto: CreateInstrumentDto) {
+    const easycoin = this.requireUserParty(
+      user,
+      'Authenticated Easycoin user does not have a linked Daml partyId',
+    );
 
     const validatedContracts = await this.damlClient.queryActiveContracts({
       templateIds: [TEMPLATE_IDS.ValidatedManagedContract],
@@ -55,9 +63,8 @@ export class InstrumentsService {
     });
   }
 
-  async getInstruments(party?: string) {
-    const defaultParties = getDefaultParties(this.configService);
-    const readerParty = party || defaultParties.easycoin;
+  async getInstruments(user: AuthenticatedUser, party?: string) {
+    const readerParty = this.resolveReaderParty(user, party);
 
     return this.damlClient.queryActiveContracts({
       templateIds: [TEMPLATE_IDS.TokenizedInstrument],
@@ -66,8 +73,12 @@ export class InstrumentsService {
     });
   }
 
-  async getInstrumentById(instrumentId: string, party?: string) {
-    const instruments = await this.getInstruments(party);
+  async getInstrumentById(
+    user: AuthenticatedUser,
+    instrumentId: string,
+    party?: string,
+  ) {
+    const instruments = await this.getInstruments(user, party);
 
     const instrument = findByPath(instruments, 'instrumentId', instrumentId);
 
@@ -81,9 +92,20 @@ export class InstrumentsService {
     return instrument;
   }
 
-  async getInstrumentSupply(instrumentId: string, party?: string) {
-    const defaultParties = getDefaultParties(this.configService);
-    const readerParty = party || defaultParties.easycoin;
+  async getTokenSupply(
+    user: AuthenticatedUser,
+    instrumentId: string,
+    party?: string,
+  ) {
+    return this.getInstrumentSupply(user, instrumentId, party);
+  }
+
+  async getInstrumentSupply(
+    user: AuthenticatedUser,
+    instrumentId: string,
+    party?: string,
+  ) {
+    const readerParty = this.resolveReaderParty(user, party);
 
     const supplies = await this.damlClient.queryActiveContracts({
       templateIds: [TEMPLATE_IDS.TokenSupply],
@@ -105,5 +127,39 @@ export class InstrumentsService {
     }
 
     return matchingSupplies;
+  }
+
+  private resolveReaderParty(
+    user: AuthenticatedUser,
+    requestedParty?: string,
+  ): string {
+    const defaultParties = getDefaultParties(this.configService);
+
+    const canUseRequestedParty =
+      user.role === UserRole.ADMIN || user.role === UserRole.EASYCOIN;
+
+    if (canUseRequestedParty && requestedParty) {
+      return requestedParty;
+    }
+
+    if (user.partyId) {
+      return user.partyId;
+    }
+
+    if (user.role === UserRole.ADMIN) {
+      return defaultParties.easycoin;
+    }
+
+    throw new BadRequestException(
+      'Authenticated user does not have a linked Daml partyId',
+    );
+  }
+
+  private requireUserParty(user: AuthenticatedUser, errorMessage: string) {
+    if (!user.partyId) {
+      throw new BadRequestException(errorMessage);
+    }
+
+    return user.partyId;
   }
 }
