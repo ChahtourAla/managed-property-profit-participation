@@ -39,16 +39,18 @@ export class ContractsService {
         legalAdmin: defaultParties.legalAdmin,
         auditor: defaultParties.auditor,
         paymentVerifier: defaultParties.paymentVerifier,
+
         contractData: {
           contractId: dto.contractId,
           propertyId: dto.propertyId,
           propertyName: dto.propertyName,
           financialPeriod: dto.financialPeriod,
-        },
-        terms: {
           expectedRentalIncome: toDamlDecimal(dto.expectedRentalIncome),
           expectedExpenses: toDamlDecimal(dto.expectedExpenses),
           reportFrequency: dto.reportFrequency,
+        },
+
+        terms: {
           easycoinFeeRate: toDamlDecimal(dto.easycoinFeeRate),
           ownerProfitShareOffered: toDamlDecimal(dto.ownerProfitShareOffered),
           ownerRetainedShare: toDamlDecimal(dto.ownerRetainedShare),
