@@ -21,11 +21,9 @@ import {
   Waves,
 } from 'lucide-react';
 
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 
 const trustedBy = ['Property firms', 'FinTech teams', 'Private capital', 'Asset managers', 'Operations leads'];
@@ -309,7 +307,9 @@ export default function Home() {
                       <span className="text-muted-foreground">Upfront liquidity</span>
                       <span className="font-semibold text-foreground">8,200 USDC</span>
                     </div>
-                    <Progress value={72} className="h-2.5 bg-secondary" />
+                    <div className="h-2.5 overflow-hidden rounded-full bg-secondary">
+                      <div className="h-full w-[72%] rounded-full bg-primary" />
+                    </div>
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-muted-foreground">Investor funding</span>
                       <span className="font-medium text-foreground">72%</span>
@@ -540,7 +540,9 @@ export default function Home() {
                     <CardContent className="p-4">
                       <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Investment portfolio</p>
                       <p className="mt-2 text-lg font-semibold text-foreground">42 active positions</p>
-                      <Progress value={66} className="mt-3 h-2 bg-secondary" />
+                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-secondary">
+                        <div className="h-full w-[66%] rounded-full bg-primary" />
+                      </div>
                     </CardContent>
                   </Card>
                   <Card className="border-border/70 bg-card">
@@ -683,18 +685,19 @@ export default function Home() {
 
           <Card className="border-border/70 bg-card/85">
             <CardContent className="p-5 sm:p-6">
-              <Accordion type="single" collapsible className="w-full">
-                {faqItems.map((item, index) => (
-                  <AccordionItem key={item.question} value={`item-${index}`}>
-                    <AccordionTrigger className="text-left text-base font-medium text-foreground no-underline hover:no-underline">
+              <div className="space-y-3">
+                {faqItems.map((item) => (
+                  <details
+                    key={item.question}
+                    className="group rounded-2xl border border-border/70 bg-background/60 px-4 py-3"
+                  >
+                    <summary className="cursor-pointer list-none text-base font-medium text-foreground">
                       {item.question}
-                    </AccordionTrigger>
-                    <AccordionContent className="text-sm leading-7 text-muted-foreground">
-                      {item.answer}
-                    </AccordionContent>
-                  </AccordionItem>
+                    </summary>
+                    <p className="mt-3 text-sm leading-7 text-muted-foreground">{item.answer}</p>
+                  </details>
                 ))}
-              </Accordion>
+              </div>
             </CardContent>
           </Card>
         </section>
