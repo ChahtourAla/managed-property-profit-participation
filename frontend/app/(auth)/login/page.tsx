@@ -41,7 +41,7 @@ export default function LoginPage() {
   };
 
   return (
-    <Card className="border-border/70 bg-card/85 shadow-[0_24px_80px_-44px_rgba(15,23,42,0.7)] backdrop-blur-xl">
+    <Card className="border-border/70 bg-card shadow-[0_24px_80px_-44px_rgba(15,23,42,0.45)]">
       <CardHeader className="space-y-1">
         <CardTitle className="text-2xl font-semibold tracking-tight">
           EasyCoin POC login
@@ -62,7 +62,7 @@ export default function LoginPage() {
                 setRole(nextRole);
                 setEmail(demoUsers[nextRole].email);
               }}
-              className="flex h-11 w-full rounded-xl border border-input/80 bg-background/70 px-3.5 py-2.5 text-sm ring-offset-background backdrop-blur-xl"
+              className="flex h-11 w-full rounded-xl border border-input/80 bg-background px-3.5 py-2.5 text-sm ring-offset-background"
             >
               {appRoles.map((item) => (
                 <option key={item} value={item}>

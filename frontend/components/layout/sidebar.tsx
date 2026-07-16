@@ -27,7 +27,7 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        'fixed inset-y-0 left-0 z-40 hidden flex-col border-r border-sidebar-border/80 bg-sidebar/85 backdrop-blur-xl transition-[width] duration-300 ease-in-out md:flex',
+        'fixed inset-y-0 left-0 z-40 hidden flex-col border-r border-sidebar-border/80 bg-sidebar transition-[width] duration-300 ease-in-out md:flex',
         collapsed ? 'w-[72px]' : 'w-64'
       )}
     >

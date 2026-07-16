@@ -21,7 +21,7 @@ export function Navbar() {
   return (
     <header
       className={cn(
-        'sticky top-0 z-30 flex h-16 items-center gap-2 border-b border-border/70 bg-background/70 px-4 shadow-[0_12px_40px_-30px_rgba(15,23,42,0.5)] backdrop-blur-xl supports-[backdrop-filter]:bg-background/55 transition-[padding] duration-300 ease-in-out md:px-6'
+        'sticky top-0 z-30 flex h-16 items-center gap-2 border-b border-border/70 bg-background px-4 transition-[padding] duration-300 ease-in-out md:px-6'
       )}
     >
       <Button

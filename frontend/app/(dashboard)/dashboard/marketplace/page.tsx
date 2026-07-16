@@ -86,24 +86,24 @@ export default function MarketplacePage() {
       ) : (
         <div className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((listing) => (
-            <Card
+              <Card
               key={listing.id}
               className="group overflow-hidden transition-all hover:shadow-lg"
             >
               <div className="relative aspect-[16/10] overflow-hidden bg-muted">
-                <div className="h-full w-full bg-gradient-to-br from-muted to-muted/50" />
+                <div className="h-full w-full bg-muted" />
                 <div className="absolute left-3 top-3 flex gap-1.5">
                   {listing.tags.map((tag) => (
                     <Badge
                       key={tag}
                       variant="outline"
-                      className={`bg-background/80 backdrop-blur-sm ${tagStyles[tag] ?? ''}`}
+                      className={`bg-background ${tagStyles[tag] ?? ''}`}
                     >
                       {tag}
                     </Badge>
                   ))}
                 </div>
-                <div className="absolute right-3 top-3 rounded-md bg-background/80 px-2 py-1 text-xs font-medium backdrop-blur-sm">
+                <div className="absolute right-3 top-3 rounded-md bg-background px-2 py-1 text-xs font-medium">
                   {listing.type}
                 </div>
               </div>

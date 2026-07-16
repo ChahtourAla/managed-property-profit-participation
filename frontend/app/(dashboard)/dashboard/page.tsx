@@ -224,7 +224,7 @@ export default function DashboardPage() {
 
       <div className="mt-6 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
         <Card className="border-border/70">
-          <CardHeader className="space-y-4 border-b border-border/60 bg-gradient-to-r from-primary/5 via-transparent to-info/5">
+          <CardHeader className="space-y-4 border-b border-border/60">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="secondary" className="gap-1.5 rounded-full px-3 py-1">
                 {profile.badge}

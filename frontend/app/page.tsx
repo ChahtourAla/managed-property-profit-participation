@@ -24,6 +24,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ThemeToggle } from '@/components/theme-toggle';
 import { Separator } from '@/components/ui/separator';
 
 const trustedBy = ['Property firms', 'FinTech teams', 'Private capital', 'Asset managers', 'Operations leads'];
@@ -186,7 +187,7 @@ function StatCard({
 
 export default function Home() {
   return (
-    <main className="relative min-h-screen overflow-hidden bg-background text-foreground">
+    <main className="relative min-h-screen overflow-hidden bg-white text-foreground">
       <div className="pointer-events-none absolute inset-0 bg-background" />
 
       <div className="relative mx-auto w-full max-w-7xl px-4 pb-12 pt-4 sm:px-6 lg:px-8">
@@ -215,9 +216,7 @@ export default function Home() {
             </nav>
 
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="secondary" className="rounded-full px-3 py-1.5 text-xs">
-                Light mode
-              </Badge>
+              <ThemeToggle />
               <Button variant="outline" size="sm" asChild>
                 <Link href="/login">Contact sales</Link>
               </Button>
@@ -231,7 +230,8 @@ export default function Home() {
           </div>
         </header>
 
-        <section id="product" className="grid gap-10 py-8 lg:grid-cols-[1.08fr_0.92fr] lg:items-center lg:py-16">
+        <section id="product" className="relative py-8 lg:py-16">
+          <div className="relative grid gap-10 lg:grid-cols-[1.08fr_0.92fr] lg:items-center">
           <div className="space-y-8">
             <div className="flex flex-wrap gap-2">
               <SectionLabel>Managed property profits</SectionLabel>
@@ -358,6 +358,7 @@ export default function Home() {
                 </div>
               </CardContent>
             </Card>
+          </div>
           </div>
         </section>
 
