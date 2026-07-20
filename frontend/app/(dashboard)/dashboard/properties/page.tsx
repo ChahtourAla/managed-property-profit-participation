@@ -1,128 +1,661 @@
 'use client';
 
-import { Building2, CheckCircle2, PencilLine, ShieldCheck, Signature, WalletCards } from 'lucide-react';
+import * as React from 'react';
+import Link from 'next/link';
+import {
+  ArrowRight,
+  Building2,
+  CalendarDays,
+  CheckCircle2,
+  ClipboardList,
+  Loader2,
+  RefreshCw,
+  ShieldCheck,
+  Sparkles,
+} from 'lucide-react';
 
-import { properties } from '@/lib/mock-properties';
-import { formatCurrency, formatDate } from '@/lib/format';
+import { useSession } from '@/lib/session';
+import {
+  createOwnerDraft,
+  getDamlCreateArguments,
+  getOwnerDrafts,
+  getValidatedContracts,
+  type OwnerDraftPayload,
+} from '@/lib/platform-api';
+import { formatCurrency } from '@/lib/format';
 import { PageHeader } from '@/components/dashboard/page-header';
 import { StatusBadge } from '@/components/dashboard/status-badge';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { toast } from 'sonner';
 
-const contract = properties[0];
+type DraftRecord = {
+  contractId: string;
+  propertyId: string;
+  propertyName: string;
+  financialPeriod: string;
+  expectedRentalIncome: number;
+  expectedExpenses: number;
+  reportFrequency: string;
+  easycoinFeeRate: number;
+  ownerProfitShareOffered: number;
+  ownerRetainedShare: number;
+  expectedInvestorSettlement: number;
+  expectedUpfrontFunding: number;
+  currency: string;
+  status: 'Draft' | 'Validated';
+  rawContractId: string;
+};
 
-const checkpoints = [
+type DraftFormState = {
+  contractId: string;
+  propertyId: string;
+  propertyName: string;
+  financialPeriod: string;
+  expectedRentalIncome: string;
+  expectedExpenses: string;
+  reportFrequency: string;
+  easycoinFeeRate: string;
+  ownerProfitShareOffered: string;
+  ownerRetainedShare: string;
+  expectedInvestorSettlement: string;
+  expectedUpfrontFunding: string;
+  currency: string;
+};
+
+const initialFormState: DraftFormState = {
+  contractId: 'MPC-001',
+  propertyId: 'PROP-001',
+  propertyName: 'Managed Apartment Casablanca',
+  financialPeriod: '2026',
+  expectedRentalIncome: '120000',
+  expectedExpenses: '24000',
+  reportFrequency: 'MONTHLY',
+  easycoinFeeRate: '0.2',
+  ownerProfitShareOffered: '0.5',
+  ownerRetainedShare: '0.5',
+  expectedInvestorSettlement: '38400',
+  expectedUpfrontFunding: '34000',
+  currency: 'MAD',
+};
+
+const workflowSteps = [
   {
-    title: 'Draft submitted',
-    description: 'Owner or Easycoin created the managed contract record.',
-    icon: PencilLine,
-    status: 'Draft',
+    title: 'Draft contract',
+    description: 'Create the managed property contract with business IDs and financial terms.',
+    icon: ClipboardList,
   },
   {
-    title: 'Owner confirmation',
-    description: 'Required only when Easycoin submits the record on behalf of the owner.',
-    icon: Signature,
-    status: 'Owner confirmation pending',
+    title: 'Easycoin review',
+    description: 'Easycoin validates the draft or requests changes before token creation.',
+    icon: ShieldCheck,
   },
   {
-    title: 'Easycoin validation',
-    description: 'Easycoin/Admin checks business data, settlement assumptions, and token readiness.',
+    title: 'Investor flow',
+    description: 'After validation, investors fund the participation instrument.',
     icon: CheckCircle2,
-    status: 'Validated',
-  },
-  {
-    title: 'Token instrument',
-    description: 'Canton instrument is created once the contract is validated.',
-    icon: WalletCards,
-    status: 'Token instrument created',
   },
 ];
 
+function toNumber(value: string) {
+  const next = Number(value);
+  return Number.isFinite(next) ? next : 0;
+}
+
+function normalizeDraftRecord(event: unknown, status: DraftRecord['status']): DraftRecord | null {
+  const raw = event as Record<string, unknown> | null;
+  if (!raw) return null;
+
+  const createArguments = getDamlCreateArguments<{
+    contractData?: Record<string, unknown>;
+    terms?: Record<string, unknown>;
+  }>({ contractId: String(raw.contractId ?? ''), createArguments: raw.createArguments as Record<string, unknown> | undefined });
+
+  const contractData = createArguments.contractData ?? {};
+  const terms = createArguments.terms ?? {};
+
+  const contractId = String(contractData.contractId ?? raw.contractId ?? '');
+  if (!contractId) return null;
+
+  return {
+    contractId,
+    propertyId: String(contractData.propertyId ?? ''),
+    propertyName: String(contractData.propertyName ?? 'Managed property'),
+    financialPeriod: String(contractData.financialPeriod ?? '2026'),
+    expectedRentalIncome: toNumber(String(contractData.expectedRentalIncome ?? 0)),
+    expectedExpenses: toNumber(String(contractData.expectedExpenses ?? 0)),
+    reportFrequency: String(contractData.reportFrequency ?? 'MONTHLY'),
+    easycoinFeeRate: toNumber(String(terms.easycoinFeeRate ?? 0)),
+    ownerProfitShareOffered: toNumber(String(terms.ownerProfitShareOffered ?? 0)),
+    ownerRetainedShare: toNumber(String(terms.ownerRetainedShare ?? 0)),
+    expectedInvestorSettlement: toNumber(String(terms.expectedInvestorSettlement ?? 0)),
+    expectedUpfrontFunding: toNumber(String(terms.expectedUpfrontFunding ?? 0)),
+    currency: String(terms.currency ?? 'MAD'),
+    status,
+    rawContractId: String(raw.contractId ?? contractId),
+  };
+}
+
+function DraftTable({
+  title,
+  description,
+  rows,
+  emptyLabel,
+  badgeLabel,
+}: {
+  title: string;
+  description: string;
+  rows: DraftRecord[];
+  emptyLabel: string;
+  badgeLabel: string;
+}) {
+  return (
+    <Card className="border-border/70">
+      <CardHeader className="space-y-2 border-b border-border/60">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <CardTitle className="text-lg">{title}</CardTitle>
+            <CardDescription>{description}</CardDescription>
+          </div>
+          <Badge variant="secondary" className="rounded-full px-3 py-1">
+            {badgeLabel}
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        {rows.length === 0 ? (
+          <div className="px-6 py-10 text-sm text-muted-foreground">{emptyLabel}</div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Contract</TableHead>
+                <TableHead>Property</TableHead>
+                <TableHead>Period</TableHead>
+                <TableHead>Income</TableHead>
+                <TableHead>Funding</TableHead>
+                <TableHead>Status</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((row) => (
+                <TableRow key={`${row.status}-${row.contractId}`}>
+                  <TableCell className="font-medium">
+                    <div className="flex flex-col gap-1">
+                      <span>{row.contractId}</span>
+                      <span className="text-xs text-muted-foreground">{row.rawContractId}</span>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-col gap-1">
+                      <span>{row.propertyName}</span>
+                      <span className="text-xs text-muted-foreground">{row.propertyId}</span>
+                    </div>
+                  </TableCell>
+                  <TableCell>{row.financialPeriod}</TableCell>
+                  <TableCell>{formatCurrency(row.expectedRentalIncome)}</TableCell>
+                  <TableCell>{formatCurrency(row.expectedUpfrontFunding)}</TableCell>
+                  <TableCell>
+                    <StatusBadge status={row.status} />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function PropertiesPage() {
+  const { session, ready } = useSession();
+  const [form, setForm] = React.useState<DraftFormState>(initialFormState);
+  const [drafts, setDrafts] = React.useState<DraftRecord[]>([]);
+  const [validatedContracts, setValidatedContracts] = React.useState<DraftRecord[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const loadOwnerData = React.useCallback(async () => {
+    if (!session.accessToken) return;
+
+    setError(null);
+    setLoading(true);
+
+    try {
+      const [draftResponse, validatedResponse] = await Promise.all([
+        getOwnerDrafts(session.accessToken),
+        getValidatedContracts(session.accessToken),
+      ]);
+
+      setDrafts(
+        draftResponse
+          .map((event) => normalizeDraftRecord(event, 'Draft'))
+          .filter(Boolean) as DraftRecord[]
+      );
+
+      setValidatedContracts(
+        validatedResponse
+          .map((event) => normalizeDraftRecord(event, 'Validated'))
+          .filter(Boolean) as DraftRecord[]
+      );
+    } catch (loadError) {
+      const message =
+        loadError instanceof Error ? loadError.message : 'Unable to load owner data';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setLoading(false);
+    }
+  }, [session.accessToken]);
+
+  React.useEffect(() => {
+    if (!ready || session.role !== 'OWNER') return;
+    void loadOwnerData();
+  }, [loadOwnerData, ready, session.role]);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await loadOwnerData();
+      toast.success('Owner workspace refreshed');
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleCreateDraft = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+
+    try {
+      const payload: OwnerDraftPayload = {
+        contractId: form.contractId.trim(),
+        propertyId: form.propertyId.trim(),
+        propertyName: form.propertyName.trim(),
+        financialPeriod: form.financialPeriod.trim(),
+        expectedRentalIncome: toNumber(form.expectedRentalIncome),
+        expectedExpenses: toNumber(form.expectedExpenses),
+        reportFrequency: form.reportFrequency.trim(),
+        easycoinFeeRate: toNumber(form.easycoinFeeRate),
+        ownerProfitShareOffered: toNumber(form.ownerProfitShareOffered),
+        ownerRetainedShare: toNumber(form.ownerRetainedShare),
+        expectedInvestorSettlement: toNumber(form.expectedInvestorSettlement),
+        expectedUpfrontFunding: toNumber(form.expectedUpfrontFunding),
+        currency: form.currency.trim().toUpperCase(),
+      };
+
+      await createOwnerDraft(session.accessToken, payload);
+      toast.success(`Draft ${payload.contractId} created`);
+      await loadOwnerData();
+    } catch (createError) {
+      const message =
+        createError instanceof Error ? createError.message : 'Unable to create draft';
+      toast.error(message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const draftCount = drafts.length;
+  const validatedCount = validatedContracts.length;
+  const totalTargetFunding = drafts.reduce((sum, item) => sum + item.expectedUpfrontFunding, 0);
+  const totalInvestorSettlement = drafts.reduce((sum, item) => sum + item.expectedInvestorSettlement, 0);
+  const latestDraft = drafts[0] ?? validatedContracts[0];
+
+  if (!ready) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (session.role !== 'OWNER') {
+    return (
+      <Card className="border-border/70">
+        <CardHeader>
+          <CardTitle className="text-xl">Owner workspace</CardTitle>
+          <CardDescription>
+            This screen is reserved for the OWNER role.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="text-sm text-muted-foreground">
+          Sign in as an owner to create and track managed contract drafts.
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <>
       <PageHeader
-        title="Managed contract"
-        description="The POC is intentionally narrow: one managed property, one owner, one financial period."
+        title="Owner workspace"
+        description="Create the managed contract draft, track validation status, and follow the lifecycle from draft to settlement."
       >
-        <Button variant="outline" size="sm" className="gap-2">
-          <ShieldCheck className="h-4 w-4" />
-          Validate contract
+        <Button variant="outline" size="sm" className="gap-2" onClick={handleRefresh} disabled={refreshing}>
+          {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          Refresh
         </Button>
-        <Button size="sm" className="gap-2">
-          <Building2 className="h-4 w-4" />
-          Open draft
+        <Button size="sm" className="gap-2" asChild>
+          <Link href="#owner-draft-form">
+            <ArrowRight className="h-4 w-4" />
+            Create draft
+          </Link>
         </Button>
       </PageHeader>
 
-      <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Card className="border-border/70">
+          <CardHeader className="pb-2">
+            <CardDescription>Active drafts</CardDescription>
+            <CardTitle className="text-2xl">{draftCount}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            Owner-submitted drafts in the current ledger view.
+          </CardContent>
+        </Card>
+        <Card className="border-border/70">
+          <CardHeader className="pb-2">
+            <CardDescription>Validated contracts</CardDescription>
+            <CardTitle className="text-2xl">{validatedCount}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            Contracts ready for the next Easycoin workflow step.
+          </CardContent>
+        </Card>
+        <Card className="border-border/70">
+          <CardHeader className="pb-2">
+            <CardDescription>Total funding target</CardDescription>
+            <CardTitle className="text-2xl">{formatCurrency(totalTargetFunding)}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            Aggregate upfront funding across active drafts.
+          </CardContent>
+        </Card>
+        <Card className="border-border/70">
+          <CardHeader className="pb-2">
+            <CardDescription>Expected investor settlement</CardDescription>
+            <CardTitle className="text-2xl">{formatCurrency(totalInvestorSettlement)}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            Future profit share targeted for investors.
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="mt-6 grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
+        <Card id="owner-draft-form" className="border-border/70">
           <CardHeader className="space-y-3 border-b border-border/60">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="secondary" className="rounded-full px-3 py-1">
-                {contract.id}
+                Managed contract draft
               </Badge>
-              <StatusBadge status={contract.status} />
+              <Badge variant="outline" className="rounded-full px-3 py-1">
+                Owner: {session.partyId}
+              </Badge>
             </div>
             <div>
-              <CardTitle className="text-xl">{contract.name}</CardTitle>
-              <CardDescription>{contract.address}</CardDescription>
+              <CardTitle className="text-xl">Create a new draft</CardTitle>
+              <CardDescription>
+                Use business IDs and financial terms. The backend takes the owner party from your JWT.
+              </CardDescription>
             </div>
           </CardHeader>
-          <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
-            <div className="rounded-xl border border-border/60 bg-background/60 p-4">
-              <p className="text-xs uppercase tracking-wider text-muted-foreground">
-                Contract value
+          <form onSubmit={handleCreateDraft}>
+            <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="contractId">Contract ID</Label>
+                <Input
+                  id="contractId"
+                  value={form.contractId}
+                  onChange={(e) => setForm((current) => ({ ...current, contractId: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="propertyId">Property ID</Label>
+                <Input
+                  id="propertyId"
+                  value={form.propertyId}
+                  onChange={(e) => setForm((current) => ({ ...current, propertyId: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="propertyName">Property name</Label>
+                <Input
+                  id="propertyName"
+                  value={form.propertyName}
+                  onChange={(e) => setForm((current) => ({ ...current, propertyName: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="financialPeriod">Financial period</Label>
+                <Input
+                  id="financialPeriod"
+                  value={form.financialPeriod}
+                  onChange={(e) => setForm((current) => ({ ...current, financialPeriod: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="reportFrequency">Report frequency</Label>
+                <Input
+                  id="reportFrequency"
+                  value={form.reportFrequency}
+                  onChange={(e) => setForm((current) => ({ ...current, reportFrequency: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="currency">Currency</Label>
+                <Input
+                  id="currency"
+                  value={form.currency}
+                  onChange={(e) => setForm((current) => ({ ...current, currency: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="easycoinFeeRate">Easycoin fee rate</Label>
+                <Input
+                  id="easycoinFeeRate"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="1"
+                  value={form.easycoinFeeRate}
+                  onChange={(e) => setForm((current) => ({ ...current, easycoinFeeRate: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="ownerProfitShareOffered">Owner profit share offered</Label>
+                <Input
+                  id="ownerProfitShareOffered"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="1"
+                  value={form.ownerProfitShareOffered}
+                  onChange={(e) => setForm((current) => ({ ...current, ownerProfitShareOffered: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="ownerRetainedShare">Owner retained share</Label>
+                <Input
+                  id="ownerRetainedShare"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="1"
+                  value={form.ownerRetainedShare}
+                  onChange={(e) => setForm((current) => ({ ...current, ownerRetainedShare: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="expectedRentalIncome">Expected rental income</Label>
+                <Input
+                  id="expectedRentalIncome"
+                  type="number"
+                  min="0"
+                  value={form.expectedRentalIncome}
+                  onChange={(e) => setForm((current) => ({ ...current, expectedRentalIncome: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="expectedExpenses">Expected expenses</Label>
+                <Input
+                  id="expectedExpenses"
+                  type="number"
+                  min="0"
+                  value={form.expectedExpenses}
+                  onChange={(e) => setForm((current) => ({ ...current, expectedExpenses: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="expectedInvestorSettlement">Expected investor settlement</Label>
+                <Input
+                  id="expectedInvestorSettlement"
+                  type="number"
+                  min="0"
+                  value={form.expectedInvestorSettlement}
+                  onChange={(e) => setForm((current) => ({ ...current, expectedInvestorSettlement: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="expectedUpfrontFunding">Expected upfront funding</Label>
+                <Input
+                  id="expectedUpfrontFunding"
+                  type="number"
+                  min="0"
+                  value={form.expectedUpfrontFunding}
+                  onChange={(e) => setForm((current) => ({ ...current, expectedUpfrontFunding: e.target.value }))}
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <Label htmlFor="ownerNote">Owner note</Label>
+                <Textarea
+                  id="ownerNote"
+                  value="This draft creates a managed property profit participation contract. The owner keeps the property while investors fund future rental profits."
+                  readOnly
+                  className="mt-2 min-h-[96px] bg-muted/30"
+                />
+              </div>
+            </CardContent>
+            <div className="flex flex-col gap-3 border-t border-border/60 px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-muted-foreground">
+                The backend ignores legacy party fields and uses your authenticated owner identity.
               </p>
-              <p className="mt-2 text-lg font-semibold">{formatCurrency(contract.value)}</p>
+              <Button type="submit" className="gap-2" disabled={saving}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                {saving ? 'Creating draft...' : 'Submit draft'}
+              </Button>
             </div>
-            <div className="rounded-xl border border-border/60 bg-background/60 p-4">
-              <p className="text-xs uppercase tracking-wider text-muted-foreground">
-                Financial period
-              </p>
-              <p className="mt-2 text-lg font-semibold">2026</p>
-            </div>
-            <div className="rounded-xl border border-border/60 bg-background/60 p-4">
-              <p className="text-xs uppercase tracking-wider text-muted-foreground">
-                Owner-side target
-              </p>
-              <p className="mt-2 text-lg font-semibold">{formatCurrency(76800)}</p>
-            </div>
-            <div className="rounded-xl border border-border/60 bg-background/60 p-4">
-              <p className="text-xs uppercase tracking-wider text-muted-foreground">
-                Created on Canton
-              </p>
-              <p className="mt-2 text-lg font-semibold">{formatDate(contract.acquired)}</p>
-            </div>
-          </CardContent>
+          </form>
         </Card>
 
-        <Card className="border-border/70">
-          <CardHeader>
-            <CardTitle className="text-base font-semibold">Lifecycle checkpoints</CardTitle>
-            <CardDescription>What happens before investors can subscribe.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {checkpoints.map((step) => (
-              <div
-                key={step.title}
-                className="flex items-start gap-3 rounded-xl border border-border/60 p-3"
-              >
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
-                  <step.icon className="h-4 w-4 text-muted-foreground" />
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center justify-between gap-3">
-                    <h3 className="text-sm font-medium">{step.title}</h3>
-                    <StatusBadge status={step.status} />
+        <div className="space-y-4">
+          <Card className="border-border/70">
+            <CardHeader>
+              <CardTitle className="text-base font-semibold">Owner workflow</CardTitle>
+              <CardDescription>The lifecycle owner sees before Easycoin validation.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {workflowSteps.map((step) => (
+                <div
+                  key={step.title}
+                  className="flex items-start gap-3 rounded-xl border border-border/60 p-3"
+                >
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
+                    <step.icon className="h-4 w-4 text-muted-foreground" />
                   </div>
-                  <p className="mt-1 text-sm text-muted-foreground">{step.description}</p>
+                  <div>
+                    <h3 className="text-sm font-medium">{step.title}</h3>
+                    <p className="mt-1 text-sm text-muted-foreground">{step.description}</p>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </CardContent>
+          </Card>
+
+          <Card className="border-border/70">
+            <CardHeader>
+              <CardTitle className="text-base font-semibold">Latest contract snapshot</CardTitle>
+              <CardDescription>Quick read of the newest owner-side record.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {latestDraft ? (
+                <>
+                  <div className="rounded-xl border border-border/60 bg-background/60 p-4">
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground">Contract</p>
+                    <p className="mt-2 text-sm font-medium">{latestDraft.contractId}</p>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl border border-border/60 bg-background/60 p-4">
+                      <p className="text-xs uppercase tracking-wider text-muted-foreground">Property</p>
+                      <p className="mt-2 text-sm font-medium">{latestDraft.propertyName}</p>
+                    </div>
+                    <div className="rounded-xl border border-border/60 bg-background/60 p-4">
+                      <p className="text-xs uppercase tracking-wider text-muted-foreground">Status</p>
+                      <div className="mt-2">
+                        <StatusBadge status={latestDraft.status} />
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-border/60 bg-background/60 p-4">
+                      <p className="text-xs uppercase tracking-wider text-muted-foreground">Expected funding</p>
+                      <p className="mt-2 text-sm font-medium">{formatCurrency(latestDraft.expectedUpfrontFunding)}</p>
+                    </div>
+                    <div className="rounded-xl border border-border/60 bg-background/60 p-4">
+                      <p className="text-xs uppercase tracking-wider text-muted-foreground">Expected settlement</p>
+                      <p className="mt-2 text-sm font-medium">{formatCurrency(latestDraft.expectedInvestorSettlement)}</p>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-sm text-muted-foreground">
+                  No owner draft is loaded yet.
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {error && (
+        <Card className="mt-6 border-destructive/30 bg-destructive/5">
+          <CardContent className="flex items-start gap-3 px-6 py-4 text-sm text-destructive">
+            <CalendarDays className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{error}</span>
           </CardContent>
         </Card>
+      )}
+
+      <div className="mt-6 space-y-4">
+        <DraftTable
+          title="Active drafts"
+          description="Owner-submitted drafts waiting for Easycoin review."
+          rows={drafts}
+          emptyLabel="No active draft found yet. Create the first managed contract draft above."
+          badgeLabel="Owner drafts"
+        />
+
+        <DraftTable
+          title="Validated contracts"
+          description="Contracts approved by Easycoin and ready for the next workflow step."
+          rows={validatedContracts}
+          emptyLabel="No validated contract yet."
+          badgeLabel="Validated"
+        />
       </div>
     </>
   );
