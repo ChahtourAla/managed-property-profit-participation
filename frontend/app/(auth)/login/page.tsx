@@ -23,21 +23,28 @@ import { toast } from 'sonner';
 
 export default function LoginPage() {
   const router = useRouter();
-  const { setRoleSession } = useSession();
+  const { signInWithBackend } = useSession();
   const [role, setRole] = React.useState(appRoles[1]);
   const [email, setEmail] = React.useState('easycoin@test.com');
+  const [password, setPassword] = React.useState('Password123!');
   const [showPassword, setShowPassword] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setTimeout(() => {
-      setRoleSession(role, email);
-      setLoading(false);
-      toast.success(`Signed in as ${role}. Redirecting to the dashboard...`);
+
+    try {
+      const session = await signInWithBackend(role, email, password);
+      toast.success(`Signed in as ${session.role}. Redirecting to the dashboard...`);
       router.push('/dashboard');
-    }, 1000);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unable to sign in';
+      toast.error(message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -101,6 +108,8 @@ export default function LoginPage() {
                 id="password"
                 type={showPassword ? 'text' : 'password'}
                 placeholder="Password123!"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
                 required
                 className="px-9"
               />
@@ -133,6 +142,15 @@ export default function LoginPage() {
           <p className="text-center text-sm text-muted-foreground">
             Password for all demo users is{' '}
             <span className="font-medium text-foreground">Password123!</span>.
+          </p>
+          <p className="text-center text-sm text-muted-foreground">
+            Don&apos;t have an account?{' '}
+            <Link
+              href="/register"
+              className="font-medium text-foreground transition-colors hover:underline"
+            >
+              Create one
+            </Link>
           </p>
           <p className="text-center text-sm text-muted-foreground">
             Roles change the menus and dashboard sections after sign in.

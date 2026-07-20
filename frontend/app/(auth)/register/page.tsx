@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Mail, Lock, User, Eye, EyeOff, Loader2, Check } from 'lucide-react';
 
+import { appRoles, demoUsers } from '@/lib/role-config';
+import { useSession } from '@/lib/session';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -21,17 +23,29 @@ import { toast } from 'sonner';
 
 export default function RegisterPage() {
   const router = useRouter();
+  const { signUpWithBackend } = useSession();
+  const [role, setRole] = React.useState(appRoles[0]);
+  const [fullName, setFullName] = React.useState('Owner Demo');
+  const [email, setEmail] = React.useState('owner@test.com');
+  const [password, setPassword] = React.useState('Password123!');
   const [showPassword, setShowPassword] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setTimeout(() => {
+
+    try {
+      const session = await signUpWithBackend(role, email, password, fullName);
       setLoading(false);
-      toast.success('Account created! Redirecting to dashboard...');
+      toast.success(`Account created for ${session.role}. Redirecting to dashboard...`);
       router.push('/dashboard');
-    }, 1000);
+    } catch (error) {
+      setLoading(false);
+      const message =
+        error instanceof Error ? error.message : 'Unable to create account';
+      toast.error(message);
+    }
   };
 
   return (
@@ -47,12 +61,34 @@ export default function RegisterPage() {
       <form onSubmit={handleSubmit}>
         <CardContent className="space-y-4">
           <div className="space-y-2">
+            <Label htmlFor="role">Role</Label>
+            <select
+              id="role"
+              value={role}
+              onChange={(e) => {
+                const nextRole = e.target.value as typeof role;
+                setRole(nextRole);
+                setFullName(demoUsers[nextRole].name);
+                setEmail(demoUsers[nextRole].email);
+              }}
+              className="flex h-11 w-full rounded-xl border border-input/80 bg-background px-3.5 py-2.5 text-sm ring-offset-background"
+            >
+              {appRoles.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-2">
             <Label htmlFor="name">Full name</Label>
             <div className="relative">
               <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 id="name"
                 placeholder="Alex Morgan"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
                 required
                 className="pl-9"
               />
@@ -66,6 +102,8 @@ export default function RegisterPage() {
                 id="email"
                 type="email"
                 placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 required
                 className="pl-9"
               />
@@ -79,6 +117,8 @@ export default function RegisterPage() {
                 id="password"
                 type={showPassword ? 'text' : 'password'}
                 placeholder="********"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
                 required
                 className="px-9"
               />
