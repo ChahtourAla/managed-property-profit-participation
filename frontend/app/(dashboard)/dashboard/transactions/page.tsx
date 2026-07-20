@@ -1,104 +1,491 @@
 'use client';
 
 import * as React from 'react';
-import { ScrollText, Search, SlidersHorizontal, ShieldCheck } from 'lucide-react';
+import { Loader2, RefreshCw, FileText, ShieldCheck, PlusCircle, XCircle, CheckCircle2 } from 'lucide-react';
 
-import { transactions, type Transaction } from '@/lib/mock-transactions';
-import { formatCurrency, formatDate } from '@/lib/format';
+import { useSession } from '@/lib/session';
+import {
+  closeSettlement,
+  createRewardRecords,
+  getClosedContracts,
+  getDamlCreateArguments,
+  getInstruments,
+  getRewardRecords,
+  getSettlements,
+  submitFinalReconciliation,
+  toNumber,
+  toStringValue,
+} from '@/lib/platform-api';
+import { formatCurrency } from '@/lib/format';
 import { PageHeader } from '@/components/dashboard/page-header';
 import { DataTable, type Column } from '@/components/dashboard/data-table';
 import { EmptyState } from '@/components/dashboard/empty-state';
-import { StatusBadge } from '@/components/dashboard/status-badge';
 import { SearchInput } from '@/components/dashboard/search-input';
 import { FilterBar, type FilterOption } from '@/components/dashboard/filter-bar';
+import { StatusBadge } from '@/components/dashboard/status-badge';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { toast } from 'sonner';
 
-const typeOptions: FilterOption[] = [
-  { label: 'Submission', value: 'Submission' },
-  { label: 'Validation', value: 'Validation' },
-  { label: 'Instrument', value: 'Instrument' },
-  { label: 'Subscription', value: 'Subscription' },
-  { label: 'Funding', value: 'Funding' },
-  { label: 'Report', value: 'Report' },
-  { label: 'Reconciliation', value: 'Reconciliation' },
-  { label: 'Reward', value: 'Reward' },
-  { label: 'Payment', value: 'Payment' },
-  { label: 'Closure', value: 'Closure' },
-  { label: 'Redemption', value: 'Redemption' },
+type SettlementRecord = {
+  contractId: string;
+  instrumentId: string;
+  totalRentalIncome: number;
+  totalExpenses: number;
+  netProfitBeforeFee: number;
+  easycoinFee: number;
+  ownerSideDistributableProfit: number;
+  investorRewardPool: number;
+  ownerRetainedProfit: number;
+  finalReportHash: string;
+};
+
+type RewardRecord = {
+  contractId: string;
+  recipient: string;
+  holdingCid: string;
+};
+
+type ClosedRecord = {
+  contractId: string;
+  instrumentId: string;
+};
+
+type InstrumentOption = {
+  contractId: string;
+  instrumentId: string;
+};
+
+const settlementFilters: FilterOption[] = [
+  { label: 'Open', value: 'Open' },
+  { label: 'Closed', value: 'Closed' },
 ];
 
-const statusOptions: FilterOption[] = [
-  { label: 'Completed', value: 'Completed' },
-  { label: 'Pending', value: 'Pending' },
-  { label: 'Processing', value: 'Processing' },
-  { label: 'Failed', value: 'Failed' },
-];
+function EasycoinTransactionsWorkspace({ token }: { token: string }) {
+  const [settlements, setSettlements] = React.useState<SettlementRecord[]>([]);
+  const [rewards, setRewards] = React.useState<RewardRecord[]>([]);
+  const [closedContracts, setClosedContracts] = React.useState<ClosedRecord[]>([]);
+  const [instruments, setInstruments] = React.useState<InstrumentOption[]>([]);
+  const [selectedInstrumentId, setSelectedInstrumentId] = React.useState('');
+  const [reconciliationCid, setReconciliationCid] = React.useState('');
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+  const [rewardForm, setRewardForm] = React.useState({ holdingCids: '', closureNote: 'All rewards have been created and settlement is ready to close.' });
+  const [reconciliationForm, setReconciliationForm] = React.useState({
+    instrumentId: '',
+    totalRentalIncome: '120000',
+    totalExpenses: '24000',
+    netProfitBeforeFee: '96000',
+    easycoinFee: '19200',
+    ownerSideDistributableProfit: '76800',
+    investorRewardPool: '38400',
+    ownerRetainedProfit: '38400',
+    finalReportHash: 'HASH-FINAL-REPORT-001',
+  });
+
+  const loadData = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const [settlementResponse, rewardResponse, closedResponse, instrumentResponse] = await Promise.all([
+        getSettlements(token),
+        getRewardRecords(token),
+        getClosedContracts(token),
+        getInstruments(token),
+      ]);
+
+      setSettlements(
+        settlementResponse
+          .map((event) => {
+            const args = getDamlCreateArguments<{
+              instrumentId?: unknown;
+              totalRentalIncome?: unknown;
+              totalExpenses?: unknown;
+              netProfitBeforeFee?: unknown;
+              easycoinFee?: unknown;
+              ownerSideDistributableProfit?: unknown;
+              investorRewardPool?: unknown;
+              ownerRetainedProfit?: unknown;
+              finalReportHash?: unknown;
+            }>({ contractId: String(event.contractId), createArguments: event.createArguments });
+            return {
+              contractId: String(event.contractId),
+              instrumentId: toStringValue(args.instrumentId, ''),
+              totalRentalIncome: toNumber(args.totalRentalIncome),
+              totalExpenses: toNumber(args.totalExpenses),
+              netProfitBeforeFee: toNumber(args.netProfitBeforeFee),
+              easycoinFee: toNumber(args.easycoinFee),
+              ownerSideDistributableProfit: toNumber(args.ownerSideDistributableProfit),
+              investorRewardPool: toNumber(args.investorRewardPool),
+              ownerRetainedProfit: toNumber(args.ownerRetainedProfit),
+              finalReportHash: toStringValue(args.finalReportHash, ''),
+            };
+          })
+          .filter((item) => item.instrumentId) as SettlementRecord[]
+      );
+
+      setRewards(
+        rewardResponse
+          .map((event) => {
+            const args = getDamlCreateArguments<{ recipient?: unknown; holdingCid?: unknown }>({
+              contractId: String(event.contractId),
+              createArguments: event.createArguments,
+            });
+            return {
+              contractId: String(event.contractId),
+              recipient: toStringValue(args.recipient, ''),
+              holdingCid: toStringValue(args.holdingCid, ''),
+            };
+          })
+          .filter((item) => item.recipient) as RewardRecord[]
+      );
+
+      setClosedContracts(
+        closedResponse
+          .map((event) => {
+            const args = getDamlCreateArguments<{ instrumentId?: unknown }>({
+              contractId: String(event.contractId),
+              createArguments: event.createArguments,
+            });
+            return {
+              contractId: String(event.contractId),
+              instrumentId: toStringValue(args.instrumentId, ''),
+            };
+          })
+          .filter((item) => item.instrumentId) as ClosedRecord[]
+      );
+
+      const normalizedInstruments = instrumentResponse.map((event) => {
+        const args = getDamlCreateArguments<{ instrumentId?: unknown }>({
+          contractId: String(event.contractId),
+          createArguments: event.createArguments,
+        });
+        return {
+          contractId: String(event.contractId),
+          instrumentId: toStringValue(args.instrumentId, ''),
+        };
+      }).filter((item) => item.instrumentId);
+
+      setInstruments(normalizedInstruments as InstrumentOption[]);
+      if (!selectedInstrumentId && normalizedInstruments[0]) {
+        setSelectedInstrumentId(normalizedInstruments[0].instrumentId);
+        setReconciliationForm((current) => ({
+          ...current,
+          instrumentId: normalizedInstruments[0].instrumentId,
+        }));
+      }
+
+      if (!reconciliationCid && settlementResponse[0]) {
+        setReconciliationCid(String(settlementResponse[0].contractId));
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [reconciliationCid, selectedInstrumentId, token]);
+
+  React.useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      await loadData();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleSubmitReconciliation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await submitFinalReconciliation(token, {
+        instrumentId: reconciliationForm.instrumentId,
+        totalRentalIncome: toNumber(reconciliationForm.totalRentalIncome),
+        totalExpenses: toNumber(reconciliationForm.totalExpenses),
+        netProfitBeforeFee: toNumber(reconciliationForm.netProfitBeforeFee),
+        easycoinFee: toNumber(reconciliationForm.easycoinFee),
+        ownerSideDistributableProfit: toNumber(reconciliationForm.ownerSideDistributableProfit),
+        investorRewardPool: toNumber(reconciliationForm.investorRewardPool),
+        ownerRetainedProfit: toNumber(reconciliationForm.ownerRetainedProfit),
+        finalReportHash: reconciliationForm.finalReportHash,
+      });
+      toast.success('Final reconciliation submitted');
+      await loadData();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to submit reconciliation');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCreateRewards = async () => {
+    if (!reconciliationCid) {
+      toast.error('Select a reconciliation CID');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await createRewardRecords(token, reconciliationCid, {
+        holdingCids: rewardForm.holdingCids
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean),
+      });
+      toast.success('Reward records created');
+      await loadData();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to create reward records');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCloseSettlement = async () => {
+    if (!reconciliationCid) {
+      toast.error('Select a reconciliation CID');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await closeSettlement(token, reconciliationCid, {
+        closureNote: rewardForm.closureNote,
+      });
+      toast.success('Settlement closed');
+      await loadData();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to close settlement');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <PageHeader
+        title="Easycoin settlement center"
+        description="Submit final reconciliation, create reward records, and close the contract."
+      >
+        <Button variant="outline" size="sm" className="gap-2" onClick={refresh} disabled={refreshing}>
+          {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          Refresh
+        </Button>
+      </PageHeader>
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Settlements</CardTitle>
+          </CardHeader>
+          <CardContent><span className="text-2xl font-semibold">{settlements.length}</span></CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Reward records</CardTitle>
+          </CardHeader>
+          <CardContent><span className="text-2xl font-semibold">{rewards.length}</span></CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Closed contracts</CardTitle>
+          </CardHeader>
+          <CardContent><span className="text-2xl font-semibold">{closedContracts.length}</span></CardContent>
+        </Card>
+      </div>
+
+      <div className="mt-6 grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
+        <Card className="border-border/70">
+          <CardHeader className="space-y-2 border-b border-border/60">
+            <CardTitle className="text-lg">Submit final reconciliation</CardTitle>
+            <CardDescription>Use the selected tokenized instrument to calculate the settlement.</CardDescription>
+          </CardHeader>
+          <form onSubmit={handleSubmitReconciliation}>
+            <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
+              <div className="space-y-2 sm:col-span-2">
+                <Label>Instrument</Label>
+                <Select value={reconciliationForm.instrumentId} onValueChange={(value) => setReconciliationForm((current) => ({ ...current, instrumentId: value }))}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select instrument" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {instruments.map((item) => (
+                      <SelectItem key={item.contractId} value={item.instrumentId}>
+                        {item.instrumentId}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Total rental income</Label>
+                <Input type="number" value={reconciliationForm.totalRentalIncome} onChange={(e) => setReconciliationForm((current) => ({ ...current, totalRentalIncome: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Total expenses</Label>
+                <Input type="number" value={reconciliationForm.totalExpenses} onChange={(e) => setReconciliationForm((current) => ({ ...current, totalExpenses: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Net profit before fee</Label>
+                <Input type="number" value={reconciliationForm.netProfitBeforeFee} onChange={(e) => setReconciliationForm((current) => ({ ...current, netProfitBeforeFee: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Easycoin fee</Label>
+                <Input type="number" value={reconciliationForm.easycoinFee} onChange={(e) => setReconciliationForm((current) => ({ ...current, easycoinFee: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Owner distributable profit</Label>
+                <Input type="number" value={reconciliationForm.ownerSideDistributableProfit} onChange={(e) => setReconciliationForm((current) => ({ ...current, ownerSideDistributableProfit: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Investor reward pool</Label>
+                <Input type="number" value={reconciliationForm.investorRewardPool} onChange={(e) => setReconciliationForm((current) => ({ ...current, investorRewardPool: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Owner retained profit</Label>
+                <Input type="number" value={reconciliationForm.ownerRetainedProfit} onChange={(e) => setReconciliationForm((current) => ({ ...current, ownerRetainedProfit: e.target.value }))} />
+              </div>
+              <div className="sm:col-span-2 space-y-2">
+                <Label>Final report hash</Label>
+                <Input value={reconciliationForm.finalReportHash} onChange={(e) => setReconciliationForm((current) => ({ ...current, finalReportHash: e.target.value }))} />
+              </div>
+            </CardContent>
+            <div className="flex items-center justify-between gap-3 border-t border-border/60 px-6 py-5">
+              <p className="text-sm text-muted-foreground">Final reconciliation is the source for rewards and closure.</p>
+              <Button type="submit" className="gap-2" disabled={saving || instruments.length === 0}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlusCircle className="h-4 w-4" />}
+                Submit reconciliation
+              </Button>
+            </div>
+          </form>
+        </Card>
+
+        <Card className="border-border/70">
+          <CardHeader className="space-y-2 border-b border-border/60">
+            <CardTitle className="text-lg">Create rewards and close</CardTitle>
+            <CardDescription>Use a reconciliation CID to create reward records and close the contract.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4 pt-6">
+            <div className="space-y-2">
+              <Label>Reconciliation CID</Label>
+              <Select value={reconciliationCid} onValueChange={setReconciliationCid}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select reconciliation" />
+                </SelectTrigger>
+                <SelectContent>
+                  {settlements.map((item) => (
+                    <SelectItem key={item.contractId} value={item.contractId}>
+                      {item.contractId} - {item.instrumentId}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Holding CIDs</Label>
+              <Input
+                value={rewardForm.holdingCids}
+                onChange={(e) => setRewardForm((current) => ({ ...current, holdingCids: e.target.value }))}
+                placeholder="Optional, comma separated"
+              />
+            </div>
+            <Button className="w-full gap-2" onClick={handleCreateRewards} disabled={saving || !reconciliationCid}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+              Create reward records
+            </Button>
+            <div className="space-y-2">
+              <Label>Closure note</Label>
+              <Input
+                value={rewardForm.closureNote}
+                onChange={(e) => setRewardForm((current) => ({ ...current, closureNote: e.target.value }))}
+              />
+            </div>
+            <Button variant="outline" className="w-full gap-2" onClick={handleCloseSettlement} disabled={saving || !reconciliationCid}>
+              <XCircle className="h-4 w-4" />
+              Close settlement
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="mt-6 grid gap-4 lg:grid-cols-3">
+        <Card className="border-border/70">
+          <CardHeader>
+            <CardTitle className="text-base font-semibold">Settlements</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {settlements.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">No reconciliation yet.</div>
+            ) : (
+              settlements.map((item) => (
+                <div key={item.contractId} className="rounded-xl border border-border/60 bg-background/60 p-4">
+                  <p className="font-medium">{item.instrumentId}</p>
+                  <p className="text-sm text-muted-foreground">{item.contractId}</p>
+                  <div className="mt-2"><StatusBadge status="Reconciled" /></div>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+        <Card className="border-border/70">
+          <CardHeader>
+            <CardTitle className="text-base font-semibold">Reward records</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {rewards.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">No reward record yet.</div>
+            ) : (
+              rewards.map((item) => (
+                <div key={item.contractId} className="rounded-xl border border-border/60 bg-background/60 p-4">
+                  <p className="font-medium">{item.recipient}</p>
+                  <p className="text-sm text-muted-foreground">{item.holdingCid}</p>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+        <Card className="border-border/70">
+          <CardHeader>
+            <CardTitle className="text-base font-semibold">Closed contracts</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {closedContracts.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">No closed contract yet.</div>
+            ) : (
+              closedContracts.map((item) => (
+                <div key={item.contractId} className="rounded-xl border border-border/60 bg-background/60 p-4">
+                  <p className="font-medium">{item.instrumentId}</p>
+                  <p className="text-sm text-muted-foreground">{item.contractId}</p>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </>
+  );
+}
 
 export default function TransactionsPage() {
-  const [search, setSearch] = React.useState('');
-  const [filters, setFilters] = React.useState<Record<string, string>>({});
+  const { session } = useSession();
 
-  const filtered = React.useMemo(() => {
-    return transactions.filter((event) => {
-      const haystack = `${event.reference} ${event.description} ${event.method}`.toLowerCase();
-      if (search && !haystack.includes(search.toLowerCase())) return false;
-      if (filters.Type && event.type !== filters.Type) return false;
-      if (filters.Status && event.status !== filters.Status) return false;
-      return true;
-    });
-  }, [search, filters]);
-
-  const columns: Column<Transaction>[] = [
-    {
-      key: 'reference',
-      header: 'Reference',
-      sortable: true,
-      sortValue: (row) => row.reference,
-      cell: (row) => <span className="font-mono text-xs font-medium">{row.reference}</span>,
-    },
-    {
-      key: 'description',
-      header: 'Event',
-      cell: (row) => (
-        <div className="flex flex-col">
-          <span className="font-medium">{row.description}</span>
-          <span className="text-xs text-muted-foreground">{formatDate(row.date)}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'type',
-      header: 'Type',
-      sortable: true,
-      sortValue: (row) => row.type,
-      cell: (row) => <Badge variant="outline">{row.type}</Badge>,
-    },
-    {
-      key: 'method',
-      header: 'Layer',
-      cell: (row) => <span className="text-muted-foreground">{row.method}</span>,
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      sortable: true,
-      sortValue: (row) => row.status,
-      cell: (row) => <StatusBadge status={row.status} />,
-    },
-    {
-      key: 'amount',
-      header: 'Amount',
-      sortable: true,
-      sortValue: (row) => row.amount,
-      align: 'right',
-      cell: (row) => (
-        <span className="font-semibold tabular-nums">
-          {row.amount ? formatCurrency(row.amount) : '—'}
-        </span>
-      ),
-    },
-  ];
+  if (session.role === 'EASYCOIN') {
+    return <EasycoinTransactionsWorkspace token={session.accessToken} />;
+  }
 
   return (
     <>
@@ -107,75 +494,15 @@ export default function TransactionsPage() {
         description="A lifecycle log for the managed contract, funding, reconciliation, closure, and burn."
       >
         <Button variant="outline" size="sm" className="gap-2">
-          <SlidersHorizontal className="h-4 w-4" />
-          Filters
-        </Button>
-        <Button size="sm" className="gap-2">
           <ShieldCheck className="h-4 w-4" />
           Export audit
         </Button>
       </PageHeader>
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <div className="rounded-xl border p-5">
-          <div className="flex items-center gap-2 pb-1">
-            <ScrollText className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">Recorded events</span>
-          </div>
-          <span className="text-xl font-semibold tabular-nums">{transactions.length}</span>
-        </div>
-        <div className="rounded-xl border p-5">
-          <div className="flex items-center gap-2 pb-1">
-            <ShieldCheck className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">Canton anchored</span>
-          </div>
-          <span className="text-xl font-semibold tabular-nums">Yes</span>
-        </div>
-        <div className="rounded-xl border p-5">
-          <div className="flex items-center gap-2 pb-1">
-            <Search className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">Visible to readers</span>
-          </div>
-          <span className="text-xl font-semibold tabular-nums">Role-based</span>
-        </div>
-      </div>
-
-      <div className="mt-6 flex flex-col gap-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <SearchInput
-            placeholder="Search event, reference, or method"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="sm:max-w-xs"
-          />
-        </div>
-
-        <FilterBar
-          filters={[
-            { label: 'Type', options: typeOptions },
-            { label: 'Status', options: statusOptions },
-          ]}
-          activeFilters={filters}
-          onFilterChange={(key, value) =>
-            setFilters((prev) => ({ ...prev, [key]: value }))
-          }
-          onClearAll={() => setFilters({})}
-        />
-
-        <DataTable
-          columns={columns}
-          data={filtered}
-          getRowId={(row) => row.id}
-          pageSize={10}
-          emptyState={
-            <EmptyState
-              icon={ScrollText}
-              title="No audit records found"
-              description="Try adjusting your search or filters."
-            />
-          }
-        />
-      </div>
+      <Card className="border-border/70">
+        <CardContent className="px-6 py-10 text-sm text-muted-foreground">
+          Use an Easycoin account to open the operational settlement workspace.
+        </CardContent>
+      </Card>
     </>
   );
 }

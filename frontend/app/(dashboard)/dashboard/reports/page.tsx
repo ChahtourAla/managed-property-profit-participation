@@ -1,15 +1,29 @@
 'use client';
 
+import * as React from 'react';
 import {
   BadgeCheck,
   CalendarRange,
   FileText,
+  Loader2,
+  Lock,
+  PlusCircle,
+  RefreshCw,
   ShieldCheck,
   TrendingUp,
   WalletCards,
-  Lock,
 } from 'lucide-react';
 
+import { useSession } from '@/lib/session';
+import {
+  createPerformanceReport,
+  getAcceptedReports,
+  getDamlCreateArguments,
+  getInstruments,
+  getReports,
+  toNumber,
+  toStringValue,
+} from '@/lib/platform-api';
 import { PageHeader } from '@/components/dashboard/page-header';
 import { ChartCard } from '@/components/dashboard/chart-card';
 import { RevenueChart } from '@/components/charts/revenue-chart';
@@ -17,7 +31,12 @@ import { PortfolioChart } from '@/components/charts/portfolio-chart';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { formatCurrency } from '@/lib/format';
+import { toast } from 'sonner';
 
 const summaryStats = [
   { label: 'Net profit before fee', value: 96000, icon: TrendingUp },
@@ -54,7 +73,301 @@ const steps = [
   },
 ];
 
+type ReportRecord = {
+  contractId: string;
+  instrumentId: string;
+  periodLabel: string;
+  reportHash: string;
+};
+
+type InstrumentOption = {
+  contractId: string;
+  instrumentId: string;
+};
+
+function EasycoinReportsWorkspace({ token }: { token: string }) {
+  const [reports, setReports] = React.useState<ReportRecord[]>([]);
+  const [acceptedReports, setAcceptedReports] = React.useState<ReportRecord[]>([]);
+  const [instruments, setInstruments] = React.useState<InstrumentOption[]>([]);
+  const [form, setForm] = React.useState({
+    instrumentId: '',
+    periodLabel: '2026-Q3',
+    rentalIncome: '120000',
+    expenses: '24000',
+    estimatedNetProfit: '96000',
+    reportUri: 'ipfs://performance-report-mpc-001',
+    reportHash: 'HASH-PERFORMANCE-REPORT-001',
+    isFinal: true,
+  });
+  const [loading, setLoading] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [refreshing, setRefreshing] = React.useState(false);
+
+  const loadData = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const [reportResponse, acceptedResponse, instrumentResponse] = await Promise.all([
+        getReports(token),
+        getAcceptedReports(token),
+        getInstruments(token),
+      ]);
+
+      const normalizedReports = reportResponse.map((event) => {
+        const args = getDamlCreateArguments<{
+          instrumentId?: unknown;
+          periodLabel?: unknown;
+          reportHash?: unknown;
+        }>({ contractId: String(event.contractId), createArguments: event.createArguments });
+        return {
+          contractId: String(event.contractId),
+          instrumentId: toStringValue(args.instrumentId, ''),
+          periodLabel: toStringValue(args.periodLabel, ''),
+          reportHash: toStringValue(args.reportHash, ''),
+        };
+      }).filter((item) => item.instrumentId);
+
+      const normalizedAccepted = acceptedResponse.map((event) => {
+        const args = getDamlCreateArguments<{
+          instrumentId?: unknown;
+          periodLabel?: unknown;
+          reportHash?: unknown;
+        }>({ contractId: String(event.contractId), createArguments: event.createArguments });
+        return {
+          contractId: String(event.contractId),
+          instrumentId: toStringValue(args.instrumentId, ''),
+          periodLabel: toStringValue(args.periodLabel, ''),
+          reportHash: toStringValue(args.reportHash, ''),
+        };
+      }).filter((item) => item.instrumentId);
+
+      const normalizedInstruments = instrumentResponse.map((event) => {
+        const args = getDamlCreateArguments<{ instrumentId?: unknown }>({
+          contractId: String(event.contractId),
+          createArguments: event.createArguments,
+        });
+        return {
+          contractId: String(event.contractId),
+          instrumentId: toStringValue(args.instrumentId, ''),
+        };
+      }).filter((item) => item.instrumentId);
+
+      setReports(normalizedReports as ReportRecord[]);
+      setAcceptedReports(normalizedAccepted as ReportRecord[]);
+      setInstruments(normalizedInstruments as InstrumentOption[]);
+      if (!form.instrumentId && normalizedInstruments[0]) {
+        setForm((current) => ({ ...current, instrumentId: normalizedInstruments[0].instrumentId }));
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [form.instrumentId, token]);
+
+  React.useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      await loadData();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await createPerformanceReport(token, {
+        instrumentId: form.instrumentId,
+        periodLabel: form.periodLabel,
+        rentalIncome: toNumber(form.rentalIncome),
+        expenses: toNumber(form.expenses),
+        estimatedNetProfit: toNumber(form.estimatedNetProfit),
+        reportUri: form.reportUri,
+        reportHash: form.reportHash,
+        isFinal: form.isFinal,
+      });
+      toast.success('Performance report created');
+      await loadData();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to create report');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <PageHeader
+        title="Easycoin reporting"
+        description="Create the performance report and track accepted reporting records before settlement."
+      >
+        <Button variant="outline" size="sm" className="gap-2" onClick={refresh} disabled={refreshing}>
+          {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          Refresh
+        </Button>
+      </PageHeader>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Reports</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <span className="text-2xl font-semibold tracking-tight">{reports.length}</span>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Accepted</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <span className="text-2xl font-semibold tracking-tight">{acceptedReports.length}</span>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Instruments</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <span className="text-2xl font-semibold tracking-tight">{instruments.length}</span>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="mt-6 grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
+        <Card className="border-border/70">
+          <CardHeader className="space-y-2 border-b border-border/60">
+            <CardTitle className="text-lg">Create performance report</CardTitle>
+            <CardDescription>Attach the report to the selected tokenized instrument.</CardDescription>
+          </CardHeader>
+          <form onSubmit={handleSubmit}>
+            <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
+              <div className="space-y-2 sm:col-span-2">
+                <Label>Instrument</Label>
+                <Select value={form.instrumentId} onValueChange={(value) => setForm((current) => ({ ...current, instrumentId: value }))}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select instrument" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {instruments.map((item) => (
+                      <SelectItem key={item.contractId} value={item.instrumentId}>
+                        {item.instrumentId}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="periodLabel">Period</Label>
+                <Input id="periodLabel" value={form.periodLabel} onChange={(e) => setForm((current) => ({ ...current, periodLabel: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="reportHash">Report hash</Label>
+                <Input id="reportHash" value={form.reportHash} onChange={(e) => setForm((current) => ({ ...current, reportHash: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="rentalIncome">Rental income</Label>
+                <Input id="rentalIncome" type="number" value={form.rentalIncome} onChange={(e) => setForm((current) => ({ ...current, rentalIncome: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="expenses">Expenses</Label>
+                <Input id="expenses" type="number" value={form.expenses} onChange={(e) => setForm((current) => ({ ...current, expenses: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="estimatedNetProfit">Net profit</Label>
+                <Input id="estimatedNetProfit" type="number" value={form.estimatedNetProfit} onChange={(e) => setForm((current) => ({ ...current, estimatedNetProfit: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="reportUri">Report URI</Label>
+                <Input id="reportUri" value={form.reportUri} onChange={(e) => setForm((current) => ({ ...current, reportUri: e.target.value }))} />
+              </div>
+              <div className="sm:col-span-2 flex items-center gap-2">
+                <Checkbox
+                  checked={form.isFinal}
+                  onCheckedChange={(checked) => setForm((current) => ({ ...current, isFinal: Boolean(checked) }))}
+                />
+                <Label>Mark as final report</Label>
+              </div>
+            </CardContent>
+            <div className="flex items-center justify-between gap-3 border-t border-border/60 px-6 py-5">
+              <p className="text-sm text-muted-foreground">
+                The backend stores the report on the selected instrument.
+              </p>
+              <Button type="submit" className="gap-2" disabled={saving || instruments.length === 0}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlusCircle className="h-4 w-4" />}
+                Create report
+              </Button>
+            </div>
+          </form>
+        </Card>
+
+        <Card className="border-border/70">
+          <CardHeader>
+            <CardTitle className="text-base font-semibold">Report state</CardTitle>
+            <CardDescription>Performance reports and accepted records.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Performance reports</p>
+              {reports.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">No report yet.</div>
+              ) : (
+                reports.map((item) => (
+                  <div key={item.contractId} className="rounded-xl border border-border/60 bg-background/60 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="font-medium">{item.instrumentId}</p>
+                        <p className="text-sm text-muted-foreground">{item.periodLabel}</p>
+                      </div>
+                      <Badge variant="outline">Report</Badge>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Accepted reports</p>
+              {acceptedReports.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">No accepted report yet.</div>
+              ) : (
+                acceptedReports.map((item) => (
+                  <div key={item.contractId} className="rounded-xl border border-border/60 bg-background/60 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="font-medium">{item.instrumentId}</p>
+                        <p className="text-sm text-muted-foreground">{item.periodLabel}</p>
+                      </div>
+                      <Badge variant="secondary">Accepted</Badge>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </>
+  );
+}
+
 export default function ReportsPage() {
+  const { session } = useSession();
+
+  if (session.role === 'EASYCOIN') {
+    return <EasycoinReportsWorkspace token={session.accessToken} />;
+  }
+
   return (
     <>
       <PageHeader

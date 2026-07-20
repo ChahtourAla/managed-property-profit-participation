@@ -20,6 +20,8 @@ import {
   getDamlCreateArguments,
   getOwnerDrafts,
   getValidatedContracts,
+  rejectOwnerDraft,
+  validateOwnerDraft,
   type OwnerDraftPayload,
 } from '@/lib/platform-api';
 import { formatCurrency } from '@/lib/format';
@@ -57,6 +59,10 @@ type DraftRecord = {
   currency: string;
   status: 'Draft' | 'Validated';
   rawContractId: string;
+};
+
+type EasycoinDraftReviewProps = {
+  token: string;
 };
 
 type DraftFormState = {
@@ -220,6 +226,273 @@ function DraftTable({
   );
 }
 
+function EasycoinDraftReview({ token }: EasycoinDraftReviewProps) {
+  const [drafts, setDrafts] = React.useState<DraftRecord[]>([]);
+  const [validatedContracts, setValidatedContracts] = React.useState<DraftRecord[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [pendingAction, setPendingAction] = React.useState<string | null>(null);
+  const [rejectReasons, setRejectReasons] = React.useState<Record<string, string>>({});
+
+  const loadData = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const [draftResponse, validatedResponse] = await Promise.all([
+        getOwnerDrafts(token),
+        getValidatedContracts(token),
+      ]);
+
+      setDrafts(
+        draftResponse
+          .map((event) => normalizeDraftRecord(event, 'Draft'))
+          .filter(Boolean) as DraftRecord[]
+      );
+
+      setValidatedContracts(
+        validatedResponse
+          .map((event) => normalizeDraftRecord(event, 'Validated'))
+          .filter(Boolean) as DraftRecord[]
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  React.useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  const handleValidate = async (contractId: string) => {
+    setPendingAction(contractId);
+    try {
+      await validateOwnerDraft(token, contractId);
+      toast.success(`Draft ${contractId} validated`);
+      await loadData();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to validate draft');
+    } finally {
+      setPendingAction(null);
+    }
+  };
+
+  const handleReject = async (contractId: string) => {
+    const reason = rejectReasons[contractId]?.trim();
+    if (!reason) {
+      toast.error('Please enter a reject reason');
+      return;
+    }
+
+    setPendingAction(contractId);
+    try {
+      await rejectOwnerDraft(token, contractId, { reason });
+      toast.success(`Draft ${contractId} rejected`);
+      setRejectReasons((current) => ({ ...current, [contractId]: '' }));
+      await loadData();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to reject draft');
+    } finally {
+      setPendingAction(null);
+    }
+  };
+
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      await loadData();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  return (
+    <>
+      <PageHeader
+        title="Easycoin draft review"
+        description="Review owner submissions, validate correct contracts, and reject drafts that need correction."
+      >
+        <Button variant="outline" size="sm" className="gap-2" onClick={refresh} disabled={refreshing}>
+          {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          Refresh
+        </Button>
+      </PageHeader>
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <Card className="border-border/70">
+          <CardHeader className="pb-2">
+            <CardDescription>Drafts pending review</CardDescription>
+            <CardTitle className="text-2xl">{drafts.length}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            Owner-submitted contracts waiting for Easycoin validation.
+          </CardContent>
+        </Card>
+        <Card className="border-border/70">
+          <CardHeader className="pb-2">
+            <CardDescription>Validated contracts</CardDescription>
+            <CardTitle className="text-2xl">{validatedContracts.length}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            Ready for token instrument creation.
+          </CardContent>
+        </Card>
+        <Card className="border-border/70">
+          <CardHeader className="pb-2">
+            <CardDescription>Current reviewer</CardDescription>
+            <CardTitle className="text-2xl">Easycoin</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">{token ? 'JWT authenticated' : 'No token'}</CardContent>
+        </Card>
+        <Card className="border-border/70">
+          <CardHeader className="pb-2">
+            <CardDescription>Next step</CardDescription>
+            <CardTitle className="text-2xl">Validate or reject</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            Approved drafts become validated contracts on the ledger.
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="mt-6 grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
+        <Card className="border-border/70">
+          <CardHeader className="space-y-2 border-b border-border/60">
+            <CardTitle className="text-lg">Draft queue</CardTitle>
+            <CardDescription>Validate the correct business case, or reject it with a reason.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4 pt-6">
+            {loading ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading drafts...
+              </div>
+            ) : drafts.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-sm text-muted-foreground">
+                No draft awaiting review.
+              </div>
+            ) : (
+              drafts.map((draft) => (
+                <div key={draft.contractId} className="rounded-2xl border border-border/60 p-4">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="space-y-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="secondary" className="rounded-full px-3 py-1">
+                          {draft.contractId}
+                        </Badge>
+                        <StatusBadge status={draft.status} />
+                      </div>
+                      <div>
+                        <h3 className="text-base font-semibold">{draft.propertyName}</h3>
+                        <p className="text-sm text-muted-foreground">
+                          {draft.propertyId} • {draft.financialPeriod} • {draft.reportFrequency}
+                        </p>
+                      </div>
+                      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                        <div className="rounded-xl border border-border/60 bg-background/60 p-3 text-sm">
+                          <p className="text-xs uppercase tracking-wider text-muted-foreground">Income</p>
+                          <p className="mt-1 font-medium">{formatCurrency(draft.expectedRentalIncome)}</p>
+                        </div>
+                        <div className="rounded-xl border border-border/60 bg-background/60 p-3 text-sm">
+                          <p className="text-xs uppercase tracking-wider text-muted-foreground">Expenses</p>
+                          <p className="mt-1 font-medium">{formatCurrency(draft.expectedExpenses)}</p>
+                        </div>
+                        <div className="rounded-xl border border-border/60 bg-background/60 p-3 text-sm">
+                          <p className="text-xs uppercase tracking-wider text-muted-foreground">Upfront funding</p>
+                          <p className="mt-1 font-medium">{formatCurrency(draft.expectedUpfrontFunding)}</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-2 lg:w-48">
+                      <Button
+                        className="gap-2"
+                        onClick={() => handleValidate(draft.contractId)}
+                        disabled={pendingAction === draft.contractId}
+                      >
+                        {pendingAction === draft.contractId ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="h-4 w-4" />
+                        )}
+                        Validate
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="mt-4 space-y-2">
+                    <Label htmlFor={`reject-${draft.contractId}`}>Reject reason</Label>
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <Input
+                        id={`reject-${draft.contractId}`}
+                        placeholder="The submitted contract data is incomplete."
+                        value={rejectReasons[draft.contractId] ?? ''}
+                        onChange={(e) =>
+                          setRejectReasons((current) => ({
+                            ...current,
+                            [draft.contractId]: e.target.value,
+                          }))
+                        }
+                      />
+                      <Button
+                        variant="outline"
+                        className="gap-2"
+                        onClick={() => handleReject(draft.contractId)}
+                        disabled={pendingAction === draft.contractId}
+                      >
+                        {pendingAction === draft.contractId ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4" />
+                        )}
+                        Reject
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/70">
+          <CardHeader>
+            <CardTitle className="text-base font-semibold">Validated contracts</CardTitle>
+            <CardDescription>Ready to use for investor approval and token creation.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {validatedContracts.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-sm text-muted-foreground">
+                No validated contract yet.
+              </div>
+            ) : (
+              validatedContracts.map((item) => (
+                <div key={item.contractId} className="rounded-xl border border-border/60 bg-background/60 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="font-medium">{item.propertyName}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {item.contractId} • {item.propertyId}
+                      </p>
+                    </div>
+                    <StatusBadge status={item.status} />
+                  </div>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <div>
+                      <p className="text-xs uppercase tracking-wider text-muted-foreground">Investor settlement</p>
+                      <p className="mt-1 text-sm font-medium">{formatCurrency(item.expectedInvestorSettlement)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-wider text-muted-foreground">Currency</p>
+                      <p className="mt-1 text-sm font-medium">{item.currency}</p>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </>
+  );
+}
+
 export default function PropertiesPage() {
   const { session, ready } = useSession();
   const [form, setForm] = React.useState<DraftFormState>(initialFormState);
@@ -326,6 +599,10 @@ export default function PropertiesPage() {
   }
 
   if (session.role !== 'OWNER') {
+    if (session.role === 'EASYCOIN') {
+      return <EasycoinDraftReview token={session.accessToken} />;
+    }
+
     return (
       <Card className="border-border/70">
         <CardHeader>
