@@ -85,6 +85,13 @@ export type ConfirmRewardPaymentPayload = {
   rewardPaymentReference: string;
 };
 
+export type CreateSubscriptionPayload = {
+  instrumentId: string;
+  requestedUnits: number;
+  upfrontAmount: number;
+  paymentReference: string;
+};
+
 const request = async <T>(path: string, options: RequestOptions) => {
   const { token, body, headers, ...rest } = options;
   const response = await fetch(`${BACKEND_BASE_URL}/api${path}`, {
@@ -126,7 +133,9 @@ const normalizeEvents = (value: unknown): DamlEvent[] => {
     ? value
     : Array.isArray((value as { value?: unknown[] } | undefined)?.value)
       ? ((value as { value?: unknown[] }).value as unknown[])
-      : [];
+      : value && typeof value === 'object'
+        ? [value]
+        : [];
 
   return items
     .map((item) => {
@@ -260,6 +269,14 @@ export async function getInstruments(token: string) {
   return normalizeEvents(response);
 }
 
+export async function getInstrumentById(token: string, instrumentId: string) {
+  const response = await request<unknown>(`/instruments/${instrumentId}`, {
+    method: 'GET',
+    token,
+  });
+  return normalizeEvents(response);
+}
+
 export async function getInstrumentSupply(token: string, instrumentId: string) {
   const response = await request<unknown>(`/instruments/${instrumentId}/supply`, {
     method: 'GET',
@@ -300,6 +317,17 @@ export async function getReports(token: string) {
 
 export async function getAcceptedReports(token: string) {
   const response = await request<unknown>('/reports/accepted', {
+    method: 'GET',
+    token,
+  });
+  return normalizeEvents(response);
+}
+
+export async function getReportsByInstrument(
+  token: string,
+  instrumentId: string,
+) {
+  const response = await request<unknown>(`/reports/instrument/${instrumentId}`, {
     method: 'GET',
     token,
   });
@@ -381,6 +409,17 @@ export async function getSubscriptions(token: string) {
   return normalizeEvents(response);
 }
 
+export async function createSubscription(
+  token: string,
+  payload: CreateSubscriptionPayload,
+) {
+  return request<unknown>('/subscriptions', {
+    method: 'POST',
+    token,
+    body: payload,
+  });
+}
+
 export async function confirmFunding(
   token: string,
   subscriptionCid: string,
@@ -419,4 +458,58 @@ export async function confirmRewardPayment(
     token,
     body: payload,
   });
+}
+
+export async function getHoldings(token: string) {
+  const response = await request<unknown>('/holdings', {
+    method: 'GET',
+    token,
+  });
+  return normalizeEvents(response);
+}
+
+export async function getHoldingsByHolder(token: string, holder: string) {
+  const response = await request<unknown>(`/holdings/party/${holder}`, {
+    method: 'GET',
+    token,
+  });
+  return normalizeEvents(response);
+}
+
+export async function getHoldingsByInstrument(
+  token: string,
+  instrumentId: string,
+) {
+  const response = await request<unknown>(`/holdings/instrument/${instrumentId}`, {
+    method: 'GET',
+    token,
+  });
+  return normalizeEvents(response);
+}
+
+export async function getHoldingByCid(token: string, holdingCid: string) {
+  const response = await request<unknown>(`/holdings/cid/${holdingCid}`, {
+    method: 'GET',
+    token,
+  });
+  return normalizeEvents(response);
+}
+
+export async function getRedemptionRecords(token: string) {
+  const response = await request<unknown>('/redemptions', {
+    method: 'GET',
+    token,
+  });
+  return normalizeEvents(response);
+}
+
+export async function getRedemptionRecordsByInstrument(
+  token: string,
+  instrumentId: string,
+) {
+  const response = await request<unknown>(`/redemptions/instrument/${instrumentId}`, {
+    method: 'GET',
+    token,
+  });
+  return normalizeEvents(response);
 }

@@ -19,8 +19,14 @@ import {
   createPerformanceReport,
   getAcceptedReports,
   getDamlCreateArguments,
+  getClosedContracts,
   getInstruments,
+  getPaymentRewards,
+  getRewardPaymentConfirmations,
   getReports,
+  getReportsByInstrument,
+  getRewardRecords,
+  getSettlements,
   toNumber,
   toStringValue,
 } from '@/lib/platform-api';
@@ -361,11 +367,264 @@ function EasycoinReportsWorkspace({ token }: { token: string }) {
   );
 }
 
+type InvestorReportSummary = {
+  contractId: string;
+  instrumentId: string;
+  periodLabel: string;
+  reportHash: string;
+};
+
+type InvestorLedgerSummary = {
+  contractId: string;
+  instrumentId: string;
+  amount: number;
+  status: string;
+};
+
+function InvestorReportsWorkspace({ token }: { token: string }) {
+  const [reports, setReports] = React.useState<InvestorReportSummary[]>([]);
+  const [acceptedReports, setAcceptedReports] = React.useState<InvestorReportSummary[]>([]);
+  const [instrumentReports, setInstrumentReports] = React.useState<InvestorReportSummary[]>([]);
+  const [settlements, setSettlements] = React.useState<InvestorLedgerSummary[]>([]);
+  const [settlementRewards, setSettlementRewards] = React.useState<InvestorLedgerSummary[]>([]);
+  const [paymentRewards, setPaymentRewards] = React.useState<InvestorLedgerSummary[]>([]);
+  const [rewardPayments, setRewardPayments] = React.useState<InvestorLedgerSummary[]>([]);
+  const [closedContracts, setClosedContracts] = React.useState<InvestorLedgerSummary[]>([]);
+  const [selectedInstrumentId, setSelectedInstrumentId] = React.useState('');
+  const [instruments, setInstruments] = React.useState<InstrumentOption[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+
+  const mapReport = (event: { contractId: string; createArguments?: Record<string, unknown> }) => {
+    const args = getDamlCreateArguments<{
+      instrumentId?: unknown;
+      periodLabel?: unknown;
+      reportHash?: unknown;
+    }>({ contractId: String(event.contractId), createArguments: event.createArguments });
+    return {
+      contractId: String(event.contractId),
+      instrumentId: toStringValue(args.instrumentId, ''),
+      periodLabel: toStringValue(args.periodLabel, ''),
+      reportHash: toStringValue(args.reportHash, ''),
+    };
+  };
+
+  const loadData = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const [
+        instrumentResponse,
+        reportResponse,
+        acceptedResponse,
+        settlementResponse,
+        settlementRewardResponse,
+        paymentRewardResponse,
+        rewardPaymentResponse,
+        closedResponse,
+      ] = await Promise.all([
+        getInstruments(token),
+        getReports(token),
+        getAcceptedReports(token),
+        getSettlements(token),
+        getRewardRecords(token),
+        getPaymentRewards(token),
+        getRewardPaymentConfirmations(token),
+        getClosedContracts(token),
+      ]);
+
+      const normalizedInstruments = instrumentResponse
+        .map((event) => {
+          const args = getDamlCreateArguments<{ instrumentId?: unknown }>({
+            contractId: String(event.contractId),
+            createArguments: event.createArguments,
+          });
+          return {
+            contractId: String(event.contractId),
+            instrumentId: toStringValue(args.instrumentId, ''),
+          };
+        })
+        .filter((item) => item.instrumentId);
+
+      const effectiveInstrumentId = selectedInstrumentId || normalizedInstruments[0]?.instrumentId || '';
+      const byInstrument = effectiveInstrumentId
+        ? await getReportsByInstrument(token, effectiveInstrumentId).catch(() => [])
+        : [];
+
+      setInstruments(normalizedInstruments as InstrumentOption[]);
+      setSelectedInstrumentId(effectiveInstrumentId);
+      setReports(reportResponse.map(mapReport).filter((item) => item.instrumentId));
+      setAcceptedReports(acceptedResponse.map(mapReport).filter((item) => item.instrumentId));
+      setInstrumentReports(byInstrument.map(mapReport).filter((item) => item.instrumentId));
+
+      setSettlements(
+        settlementResponse.map((event) => {
+          const args = getDamlCreateArguments<{
+            instrumentId?: unknown;
+            investorRewardPool?: unknown;
+            status?: unknown;
+          }>({ contractId: String(event.contractId), createArguments: event.createArguments });
+          return {
+            contractId: String(event.contractId),
+            instrumentId: toStringValue(args.instrumentId, ''),
+            amount: toNumber(args.investorRewardPool),
+            status: toStringValue(args.status, 'RECONCILED'),
+          };
+        }).filter((item) => item.instrumentId)
+      );
+
+      const mapReward = (event: { contractId: string; createArguments?: Record<string, unknown> }) => {
+        const args = getDamlCreateArguments<{
+          instrumentId?: unknown;
+          rewardAmount?: unknown;
+          status?: unknown;
+        }>({ contractId: String(event.contractId), createArguments: event.createArguments });
+        return {
+          contractId: String(event.contractId),
+          instrumentId: toStringValue(args.instrumentId, ''),
+          amount: toNumber(args.rewardAmount),
+          status: toStringValue(args.status, 'PAYMENT_PENDING'),
+        };
+      };
+
+      setSettlementRewards(settlementRewardResponse.map(mapReward).filter((item) => item.instrumentId));
+      setPaymentRewards(paymentRewardResponse.map(mapReward).filter((item) => item.instrumentId));
+      setRewardPayments(
+        rewardPaymentResponse.map((event) => {
+          const args = getDamlCreateArguments<{
+            instrumentId?: unknown;
+            rewardAmount?: unknown;
+            status?: unknown;
+          }>({ contractId: String(event.contractId), createArguments: event.createArguments });
+          return {
+            contractId: String(event.contractId),
+            instrumentId: toStringValue(args.instrumentId, ''),
+            amount: toNumber(args.rewardAmount),
+            status: toStringValue(args.status, 'REWARD_PAID'),
+          };
+        }).filter((item) => item.instrumentId)
+      );
+      setClosedContracts(
+        closedResponse.map((event) => {
+          const args = getDamlCreateArguments<{ instrumentId?: unknown; status?: unknown }>({
+            contractId: String(event.contractId),
+            createArguments: event.createArguments,
+          });
+          return {
+            contractId: String(event.contractId),
+            instrumentId: toStringValue(args.instrumentId, ''),
+            amount: 0,
+            status: toStringValue(args.status, 'CLOSED'),
+          };
+        }).filter((item) => item.instrumentId)
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedInstrumentId, token]);
+
+  React.useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      await loadData();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <PageHeader
+        title="Investor reporting"
+        description="Read performance reports, settlements, closed contracts, and reward payment records visible to your party."
+      >
+        <Button variant="outline" size="sm" className="gap-2" onClick={refresh} disabled={refreshing}>
+          {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          Refresh
+        </Button>
+      </PageHeader>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Reports</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{reports.length}</span></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Accepted</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{acceptedReports.length}</span></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Rewards</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{formatCurrency([...settlementRewards, ...paymentRewards].reduce((sum, item) => sum + item.amount, 0))}</span></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Paid</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{formatCurrency(rewardPayments.reduce((sum, item) => sum + item.amount, 0))}</span></CardContent></Card>
+      </div>
+
+      <div className="mt-6 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+        <Card className="border-border/70">
+          <CardHeader>
+            <CardTitle className="text-base font-semibold">Reports by instrument</CardTitle>
+            <CardDescription>Uses `/reports/instrument/:instrumentId` for the selected instrument.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Select value={selectedInstrumentId} onValueChange={setSelectedInstrumentId}>
+              <SelectTrigger><SelectValue placeholder="Select instrument" /></SelectTrigger>
+              <SelectContent>
+                {instruments.map((item) => (
+                  <SelectItem key={item.contractId} value={item.instrumentId}>{item.instrumentId}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {instrumentReports.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-sm text-muted-foreground">No report for selected instrument.</div>
+            ) : (
+              instrumentReports.map((item) => (
+                <div key={item.contractId} className="rounded-xl border border-border/60 bg-background/60 p-4">
+                  <p className="font-medium">{item.instrumentId}</p>
+                  <p className="text-sm text-muted-foreground">{item.periodLabel} - {item.reportHash}</p>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/70">
+          <CardHeader>
+            <CardTitle className="text-base font-semibold">Settlement records</CardTitle>
+            <CardDescription>Final reconciliation, reward records, confirmations, and closure.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 sm:grid-cols-2">
+            {[...settlements, ...settlementRewards, ...paymentRewards, ...rewardPayments, ...closedContracts].length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-sm text-muted-foreground sm:col-span-2">No settlement record yet.</div>
+            ) : (
+              [...settlements, ...settlementRewards, ...paymentRewards, ...rewardPayments, ...closedContracts].map((item) => (
+                <div key={`${item.contractId}-${item.status}`} className="rounded-xl border border-border/60 bg-background/60 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="font-medium">{item.instrumentId}</p>
+                    <Badge variant="outline">{item.status}</Badge>
+                  </div>
+                  {item.amount > 0 && <p className="mt-3 text-sm font-semibold text-success">{formatCurrency(item.amount)}</p>}
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </>
+  );
+}
+
 export default function ReportsPage() {
   const { session } = useSession();
 
   if (session.role === 'EASYCOIN') {
     return <EasycoinReportsWorkspace token={session.accessToken} />;
+  }
+
+  if (session.role === 'INVESTOR') {
+    return <InvestorReportsWorkspace token={session.accessToken} />;
   }
 
   return (

@@ -10,6 +10,8 @@ import {
   getClosedContracts,
   getDamlCreateArguments,
   getInstruments,
+  getRedemptionRecords,
+  getRedemptionRecordsByInstrument,
   getRewardRecords,
   getSettlements,
   submitFinalReconciliation,
@@ -480,11 +482,234 @@ function EasycoinTransactionsWorkspace({ token }: { token: string }) {
   );
 }
 
+type InvestorTransactionRecord = {
+  contractId: string;
+  instrumentId: string;
+  status: string;
+  amount?: number;
+  reference?: string;
+};
+
+function InvestorTransactionsWorkspace({ token }: { token: string }) {
+  const [settlements, setSettlements] = React.useState<InvestorTransactionRecord[]>([]);
+  const [rewards, setRewards] = React.useState<InvestorTransactionRecord[]>([]);
+  const [closedContracts, setClosedContracts] = React.useState<InvestorTransactionRecord[]>([]);
+  const [redemptions, setRedemptions] = React.useState<InvestorTransactionRecord[]>([]);
+  const [redemptionsByInstrument, setRedemptionsByInstrument] = React.useState<InvestorTransactionRecord[]>([]);
+  const [instruments, setInstruments] = React.useState<InstrumentOption[]>([]);
+  const [selectedInstrumentId, setSelectedInstrumentId] = React.useState('');
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+
+  const loadData = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const [settlementResponse, rewardResponse, closedResponse, redemptionResponse, instrumentResponse] = await Promise.all([
+        getSettlements(token),
+        getRewardRecords(token),
+        getClosedContracts(token),
+        getRedemptionRecords(token),
+        getInstruments(token),
+      ]);
+
+      const normalizedInstruments = instrumentResponse
+        .map((event) => {
+          const args = getDamlCreateArguments<{ instrumentId?: unknown }>({
+            contractId: String(event.contractId),
+            createArguments: event.createArguments,
+          });
+          return {
+            contractId: String(event.contractId),
+            instrumentId: toStringValue(args.instrumentId, ''),
+          };
+        })
+        .filter((item) => item.instrumentId);
+
+      const effectiveInstrumentId = selectedInstrumentId || normalizedInstruments[0]?.instrumentId || '';
+      const byInstrumentResponse = effectiveInstrumentId
+        ? await getRedemptionRecordsByInstrument(token, effectiveInstrumentId).catch(() => [])
+        : [];
+
+      setInstruments(normalizedInstruments as InstrumentOption[]);
+      setSelectedInstrumentId(effectiveInstrumentId);
+      setSettlements(
+        settlementResponse.map((event) => {
+          const args = getDamlCreateArguments<{
+            instrumentId?: unknown;
+            investorRewardPool?: unknown;
+            status?: unknown;
+          }>({ contractId: String(event.contractId), createArguments: event.createArguments });
+          return {
+            contractId: String(event.contractId),
+            instrumentId: toStringValue(args.instrumentId, ''),
+            amount: toNumber(args.investorRewardPool),
+            status: toStringValue(args.status, 'RECONCILED'),
+          };
+        }).filter((item) => item.instrumentId)
+      );
+      setRewards(
+        rewardResponse.map((event) => {
+          const args = getDamlCreateArguments<{
+            instrumentId?: unknown;
+            rewardAmount?: unknown;
+            status?: unknown;
+          }>({ contractId: String(event.contractId), createArguments: event.createArguments });
+          return {
+            contractId: String(event.contractId),
+            instrumentId: toStringValue(args.instrumentId, ''),
+            amount: toNumber(args.rewardAmount),
+            status: toStringValue(args.status, 'PAYMENT_PENDING'),
+          };
+        }).filter((item) => item.instrumentId)
+      );
+      setClosedContracts(
+        closedResponse.map((event) => {
+          const args = getDamlCreateArguments<{
+            instrumentId?: unknown;
+            closureNote?: unknown;
+            status?: unknown;
+          }>({ contractId: String(event.contractId), createArguments: event.createArguments });
+          return {
+            contractId: String(event.contractId),
+            instrumentId: toStringValue(args.instrumentId, ''),
+            reference: toStringValue(args.closureNote, ''),
+            status: toStringValue(args.status, 'CLOSED'),
+          };
+        }).filter((item) => item.instrumentId)
+      );
+
+      const mapRedemption = (event: { contractId: string; createArguments?: Record<string, unknown> }) => {
+        const args = getDamlCreateArguments<{
+          instrumentId?: unknown;
+          redeemedUnits?: unknown;
+          burnReference?: unknown;
+          status?: unknown;
+        }>({ contractId: String(event.contractId), createArguments: event.createArguments });
+        return {
+          contractId: String(event.contractId),
+          instrumentId: toStringValue(args.instrumentId, ''),
+          amount: toNumber(args.redeemedUnits),
+          reference: toStringValue(args.burnReference, ''),
+          status: toStringValue(args.status, 'TOKENS_REDEEMED_BURNED'),
+        };
+      };
+
+      setRedemptions(redemptionResponse.map(mapRedemption).filter((item) => item.instrumentId));
+      setRedemptionsByInstrument(byInstrumentResponse.map(mapRedemption).filter((item) => item.instrumentId));
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedInstrumentId, token]);
+
+  React.useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      await loadData();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <PageHeader
+        title="Investor audit trail"
+        description="Read settlement, reward, closure, and redemption records visible to your investor party."
+      >
+        <Button variant="outline" size="sm" className="gap-2" onClick={refresh} disabled={refreshing}>
+          {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          Refresh
+        </Button>
+      </PageHeader>
+
+      <div className="grid gap-4 sm:grid-cols-4">
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Settlements</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{settlements.length}</span></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Rewards</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{rewards.length}</span></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Closed</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{closedContracts.length}</span></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Redemptions</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{redemptions.length}</span></CardContent></Card>
+      </div>
+
+      <div className="mt-6 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+        <Card className="border-border/70">
+          <CardHeader>
+            <CardTitle className="text-base font-semibold">Redemptions by instrument</CardTitle>
+            <CardDescription>Uses `/redemptions/instrument/:instrumentId`.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Select value={selectedInstrumentId} onValueChange={setSelectedInstrumentId}>
+              <SelectTrigger><SelectValue placeholder="Select instrument" /></SelectTrigger>
+              <SelectContent>
+                {instruments.map((item) => (
+                  <SelectItem key={item.contractId} value={item.instrumentId}>{item.instrumentId}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {redemptionsByInstrument.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-sm text-muted-foreground">No redemption for selected instrument.</div>
+            ) : (
+              redemptionsByInstrument.map((item) => (
+                <div key={item.contractId} className="rounded-xl border border-border/60 bg-background/60 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="font-medium">{item.instrumentId}</p>
+                    <StatusBadge status={item.status} />
+                  </div>
+                  <p className="mt-3 text-sm text-muted-foreground">{item.amount} units - {item.reference}</p>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/70">
+          <CardHeader>
+            <CardTitle className="text-base font-semibold">Lifecycle records</CardTitle>
+            <CardDescription>Final reconciliation, rewards, closure, and burn records.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 sm:grid-cols-2">
+            {[...settlements, ...rewards, ...closedContracts, ...redemptions].length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-sm text-muted-foreground sm:col-span-2">No lifecycle transaction yet.</div>
+            ) : (
+              [...settlements, ...rewards, ...closedContracts, ...redemptions].map((item) => (
+                <div key={`${item.contractId}-${item.status}`} className="rounded-xl border border-border/60 bg-background/60 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="font-medium">{item.instrumentId}</p>
+                    <StatusBadge status={item.status} />
+                  </div>
+                  {item.amount !== undefined && item.amount > 0 && (
+                    <p className="mt-3 text-sm text-muted-foreground">{item.amount}</p>
+                  )}
+                  {item.reference && <p className="mt-1 text-xs text-muted-foreground">{item.reference}</p>}
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </>
+  );
+}
+
 export default function TransactionsPage() {
   const { session } = useSession();
 
   if (session.role === 'EASYCOIN') {
     return <EasycoinTransactionsWorkspace token={session.accessToken} />;
+  }
+
+  if (session.role === 'INVESTOR') {
+    return <InvestorTransactionsWorkspace token={session.accessToken} />;
   }
 
   return (

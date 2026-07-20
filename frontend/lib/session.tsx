@@ -2,7 +2,12 @@
 
 import * as React from 'react';
 
-import { demoUsers, type AppRole, type DemoUser } from '@/lib/role-config';
+import {
+  demoUsers,
+  localDamlParties,
+  type AppRole,
+  type DemoUser,
+} from '@/lib/role-config';
 import {
   BackendApiError,
   getMe,
@@ -56,6 +61,24 @@ const nextPartyId = (role: AppRole) => {
   const nextCount = (counters[role] ?? 0) + 1;
   counters[role] = nextCount;
   setPartyCounterState(counters);
+
+  const predefinedParties: Partial<Record<AppRole, string[]>> = {
+    OWNER: [localDamlParties.owner],
+    EASYCOIN: [localDamlParties.easycoin],
+    INVESTOR: [
+      localDamlParties.investor1,
+      localDamlParties.investor2,
+      localDamlParties.investor3,
+      localDamlParties.investor4,
+    ],
+    AUDITOR: [localDamlParties.auditor],
+    PAYMENT_VERIFIER: [localDamlParties.paymentVerifier],
+    LEGAL_ADMIN: [localDamlParties.legalAdmin],
+  };
+
+  const party = predefinedParties[role]?.[nextCount - 1];
+  if (party) return party;
+
   return `Party::${role}${nextCount}`;
 };
 
