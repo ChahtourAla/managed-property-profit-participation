@@ -16,6 +16,7 @@ import {
 
 import { useSession } from '@/lib/session';
 import {
+  acceptReport,
   createPerformanceReport,
   getAcceptedReports,
   getDamlCreateArguments,
@@ -381,7 +382,13 @@ type InvestorLedgerSummary = {
   status: string;
 };
 
-function InvestorReportsWorkspace({ token }: { token: string }) {
+function InvestorReportsWorkspace({
+  token,
+  roleLabel = 'Investor',
+}: {
+  token: string;
+  roleLabel?: 'Investor' | 'Legal admin';
+}) {
   const [reports, setReports] = React.useState<InvestorReportSummary[]>([]);
   const [acceptedReports, setAcceptedReports] = React.useState<InvestorReportSummary[]>([]);
   const [instrumentReports, setInstrumentReports] = React.useState<InvestorReportSummary[]>([]);
@@ -546,7 +553,7 @@ function InvestorReportsWorkspace({ token }: { token: string }) {
   return (
     <>
       <PageHeader
-        title="Investor reporting"
+        title={`${roleLabel} reporting`}
         description="Read performance reports, settlements, closed contracts, and reward payment records visible to your party."
       >
         <Button variant="outline" size="sm" className="gap-2" onClick={refresh} disabled={refreshing}>
@@ -616,6 +623,412 @@ function InvestorReportsWorkspace({ token }: { token: string }) {
   );
 }
 
+function AuditorReportsWorkspace({ token }: { token: string }) {
+  const [reports, setReports] = React.useState<InvestorReportSummary[]>([]);
+  const [acceptedReports, setAcceptedReports] = React.useState<InvestorReportSummary[]>([]);
+  const [instrumentReports, setInstrumentReports] = React.useState<InvestorReportSummary[]>([]);
+  const [settlements, setSettlements] = React.useState<InvestorLedgerSummary[]>([]);
+  const [rewards, setRewards] = React.useState<InvestorLedgerSummary[]>([]);
+  const [closedContracts, setClosedContracts] = React.useState<InvestorLedgerSummary[]>([]);
+  const [instruments, setInstruments] = React.useState<InstrumentOption[]>([]);
+  const [selectedInstrumentId, setSelectedInstrumentId] = React.useState('');
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [accepting, setAccepting] = React.useState<string | null>(null);
+
+  const mapReport = (event: { contractId: string; createArguments?: Record<string, unknown> }) => {
+    const args = getDamlCreateArguments<{
+      instrumentId?: unknown;
+      periodLabel?: unknown;
+      reportHash?: unknown;
+    }>({ contractId: String(event.contractId), createArguments: event.createArguments });
+    return {
+      contractId: String(event.contractId),
+      instrumentId: toStringValue(args.instrumentId, ''),
+      periodLabel: toStringValue(args.periodLabel, ''),
+      reportHash: toStringValue(args.reportHash, ''),
+    };
+  };
+
+  const loadData = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const [instrumentResponse, reportResponse, acceptedResponse, settlementResponse, rewardResponse, closedResponse] =
+        await Promise.all([
+          getInstruments(token),
+          getReports(token),
+          getAcceptedReports(token),
+          getSettlements(token),
+          getRewardRecords(token),
+          getClosedContracts(token),
+        ]);
+
+      const normalizedInstruments = instrumentResponse
+        .map((event) => {
+          const args = getDamlCreateArguments<{ instrumentId?: unknown }>({
+            contractId: String(event.contractId),
+            createArguments: event.createArguments,
+          });
+          return {
+            contractId: String(event.contractId),
+            instrumentId: toStringValue(args.instrumentId, ''),
+          };
+        })
+        .filter((item) => item.instrumentId);
+
+      const effectiveInstrumentId = selectedInstrumentId || normalizedInstruments[0]?.instrumentId || '';
+      const byInstrument = effectiveInstrumentId
+        ? await getReportsByInstrument(token, effectiveInstrumentId).catch(() => [])
+        : [];
+
+      setInstruments(normalizedInstruments as InstrumentOption[]);
+      setSelectedInstrumentId(effectiveInstrumentId);
+      setReports(reportResponse.map(mapReport).filter((item) => item.instrumentId));
+      setAcceptedReports(acceptedResponse.map(mapReport).filter((item) => item.instrumentId));
+      setInstrumentReports(byInstrument.map(mapReport).filter((item) => item.instrumentId));
+      setSettlements(
+        settlementResponse.map((event) => {
+          const args = getDamlCreateArguments<{ instrumentId?: unknown; investorRewardPool?: unknown; status?: unknown }>({
+            contractId: String(event.contractId),
+            createArguments: event.createArguments,
+          });
+          return {
+            contractId: String(event.contractId),
+            instrumentId: toStringValue(args.instrumentId, ''),
+            amount: toNumber(args.investorRewardPool),
+            status: toStringValue(args.status, 'RECONCILED'),
+          };
+        }).filter((item) => item.instrumentId)
+      );
+      setRewards(
+        rewardResponse.map((event) => {
+          const args = getDamlCreateArguments<{ instrumentId?: unknown; rewardAmount?: unknown; status?: unknown }>({
+            contractId: String(event.contractId),
+            createArguments: event.createArguments,
+          });
+          return {
+            contractId: String(event.contractId),
+            instrumentId: toStringValue(args.instrumentId, ''),
+            amount: toNumber(args.rewardAmount),
+            status: toStringValue(args.status, 'PAYMENT_PENDING'),
+          };
+        }).filter((item) => item.instrumentId)
+      );
+      setClosedContracts(
+        closedResponse.map((event) => {
+          const args = getDamlCreateArguments<{ instrumentId?: unknown; status?: unknown }>({
+            contractId: String(event.contractId),
+            createArguments: event.createArguments,
+          });
+          return {
+            contractId: String(event.contractId),
+            instrumentId: toStringValue(args.instrumentId, ''),
+            amount: 0,
+            status: toStringValue(args.status, 'CLOSED'),
+          };
+        }).filter((item) => item.instrumentId)
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedInstrumentId, token]);
+
+  React.useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      await loadData();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleAcceptReport = async (reportCid: string) => {
+    setAccepting(reportCid);
+    try {
+      await acceptReport(token, reportCid);
+      toast.success('Report accepted');
+      await loadData();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to accept report');
+    } finally {
+      setAccepting(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <PageHeader
+        title="Auditor reporting"
+        description="Review performance reports, accept them, and inspect reconciliation records."
+      >
+        <Button variant="outline" size="sm" className="gap-2" onClick={refresh} disabled={refreshing}>
+          {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          Refresh
+        </Button>
+      </PageHeader>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Reports</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{reports.length}</span></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Accepted</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{acceptedReports.length}</span></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Settlements</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{settlements.length}</span></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Closed</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{closedContracts.length}</span></CardContent></Card>
+      </div>
+
+      <div className="mt-6 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+        <Card className="border-border/70">
+          <CardHeader>
+            <CardTitle className="text-base font-semibold">Reports awaiting audit</CardTitle>
+            <CardDescription>Accept a report by its Daml contract ID.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {reports.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-sm text-muted-foreground">No performance report visible.</div>
+            ) : (
+              reports.map((item) => (
+                <div key={item.contractId} className="rounded-xl border border-border/60 bg-background/60 p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <p className="font-medium">{item.instrumentId}</p>
+                      <p className="truncate text-sm text-muted-foreground">{item.periodLabel} - {item.reportHash}</p>
+                    </div>
+                    <Button size="sm" className="gap-2" onClick={() => handleAcceptReport(item.contractId)} disabled={accepting === item.contractId}>
+                      {accepting === item.contractId ? <Loader2 className="h-4 w-4 animate-spin" /> : <BadgeCheck className="h-4 w-4" />}
+                      Accept
+                    </Button>
+                  </div>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/70">
+          <CardHeader>
+            <CardTitle className="text-base font-semibold">Reports by instrument</CardTitle>
+            <CardDescription>Uses `/reports/instrument/:instrumentId`.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Select value={selectedInstrumentId} onValueChange={setSelectedInstrumentId}>
+              <SelectTrigger><SelectValue placeholder="Select instrument" /></SelectTrigger>
+              <SelectContent>
+                {instruments.map((item) => (
+                  <SelectItem key={item.contractId} value={item.instrumentId}>{item.instrumentId}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {instrumentReports.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-sm text-muted-foreground">No report for selected instrument.</div>
+            ) : (
+              instrumentReports.map((item) => (
+                <div key={item.contractId} className="rounded-xl border border-border/60 bg-background/60 p-4">
+                  <p className="font-medium">{item.instrumentId}</p>
+                  <p className="text-sm text-muted-foreground">{item.periodLabel}</p>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="mt-6 grid gap-4 lg:grid-cols-3">
+        <Card className="border-border/70">
+          <CardHeader><CardTitle className="text-base font-semibold">Accepted reports</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            {acceptedReports.length === 0 ? <div className="rounded-xl border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">No accepted report yet.</div> : acceptedReports.map((item) => (
+              <div key={item.contractId} className="rounded-xl border border-border/60 bg-background/60 p-4"><p className="font-medium">{item.instrumentId}</p><p className="text-sm text-muted-foreground">{item.periodLabel}</p></div>
+            ))}
+          </CardContent>
+        </Card>
+        <Card className="border-border/70">
+          <CardHeader><CardTitle className="text-base font-semibold">Settlements and rewards</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            {[...settlements, ...rewards].length === 0 ? <div className="rounded-xl border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">No settlement record visible.</div> : [...settlements, ...rewards].map((item) => (
+              <div key={`${item.contractId}-${item.status}`} className="rounded-xl border border-border/60 bg-background/60 p-4"><div className="flex items-center justify-between gap-3"><p className="font-medium">{item.instrumentId}</p><Badge variant="outline">{item.status}</Badge></div>{item.amount > 0 && <p className="mt-2 text-sm">{formatCurrency(item.amount)}</p>}</div>
+            ))}
+          </CardContent>
+        </Card>
+        <Card className="border-border/70">
+          <CardHeader><CardTitle className="text-base font-semibold">Closed contracts</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            {closedContracts.length === 0 ? <div className="rounded-xl border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">No closed contract visible.</div> : closedContracts.map((item) => (
+              <div key={item.contractId} className="rounded-xl border border-border/60 bg-background/60 p-4"><p className="font-medium">{item.instrumentId}</p><p className="text-sm text-muted-foreground">{item.status}</p></div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+    </>
+  );
+}
+
+function PaymentVerifierReportsWorkspace({ token }: { token: string }) {
+  const [reports, setReports] = React.useState<InvestorReportSummary[]>([]);
+  const [acceptedReports, setAcceptedReports] = React.useState<InvestorReportSummary[]>([]);
+  const [settlements, setSettlements] = React.useState<InvestorLedgerSummary[]>([]);
+  const [rewards, setRewards] = React.useState<InvestorLedgerSummary[]>([]);
+  const [rewardPayments, setRewardPayments] = React.useState<InvestorLedgerSummary[]>([]);
+  const [closedContracts, setClosedContracts] = React.useState<InvestorLedgerSummary[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+
+  const mapReport = (event: { contractId: string; createArguments?: Record<string, unknown> }) => {
+    const args = getDamlCreateArguments<{
+      instrumentId?: unknown;
+      periodLabel?: unknown;
+      reportHash?: unknown;
+    }>({ contractId: String(event.contractId), createArguments: event.createArguments });
+    return {
+      contractId: String(event.contractId),
+      instrumentId: toStringValue(args.instrumentId, ''),
+      periodLabel: toStringValue(args.periodLabel, ''),
+      reportHash: toStringValue(args.reportHash, ''),
+    };
+  };
+
+  const loadData = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const [reportResponse, acceptedResponse, settlementResponse, rewardResponse, rewardPaymentResponse, closedResponse] =
+        await Promise.all([
+          getReports(token),
+          getAcceptedReports(token),
+          getSettlements(token),
+          getRewardRecords(token),
+          getRewardPaymentConfirmations(token),
+          getClosedContracts(token),
+        ]);
+
+      setReports(reportResponse.map(mapReport).filter((item) => item.instrumentId));
+      setAcceptedReports(acceptedResponse.map(mapReport).filter((item) => item.instrumentId));
+      setSettlements(
+        settlementResponse.map((event) => {
+          const args = getDamlCreateArguments<{ instrumentId?: unknown; investorRewardPool?: unknown; status?: unknown }>({
+            contractId: String(event.contractId),
+            createArguments: event.createArguments,
+          });
+          return {
+            contractId: String(event.contractId),
+            instrumentId: toStringValue(args.instrumentId, ''),
+            amount: toNumber(args.investorRewardPool),
+            status: toStringValue(args.status, 'RECONCILED'),
+          };
+        }).filter((item) => item.instrumentId)
+      );
+      const mapReward = (event: { contractId: string; createArguments?: Record<string, unknown> }) => {
+        const args = getDamlCreateArguments<{ instrumentId?: unknown; rewardAmount?: unknown; status?: unknown }>({
+          contractId: String(event.contractId),
+          createArguments: event.createArguments,
+        });
+        return {
+          contractId: String(event.contractId),
+          instrumentId: toStringValue(args.instrumentId, ''),
+          amount: toNumber(args.rewardAmount),
+          status: toStringValue(args.status, 'PAYMENT_PENDING'),
+        };
+      };
+      setRewards(rewardResponse.map(mapReward).filter((item) => item.instrumentId));
+      setRewardPayments(rewardPaymentResponse.map(mapReward).filter((item) => item.instrumentId));
+      setClosedContracts(
+        closedResponse.map((event) => {
+          const args = getDamlCreateArguments<{ instrumentId?: unknown; status?: unknown }>({
+            contractId: String(event.contractId),
+            createArguments: event.createArguments,
+          });
+          return {
+            contractId: String(event.contractId),
+            instrumentId: toStringValue(args.instrumentId, ''),
+            amount: 0,
+            status: toStringValue(args.status, 'CLOSED'),
+          };
+        }).filter((item) => item.instrumentId)
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  React.useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      await loadData();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <PageHeader
+        title="Payment reporting"
+        description="Review reports, settlement records, reward records, and payment confirmations visible to payment verification."
+      >
+        <Button variant="outline" size="sm" className="gap-2" onClick={refresh} disabled={refreshing}>
+          {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          Refresh
+        </Button>
+      </PageHeader>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Reports</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{reports.length}</span></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Settlements</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{settlements.length}</span></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Rewards</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{rewards.length}</span></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Paid rewards</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{rewardPayments.length}</span></CardContent></Card>
+      </div>
+
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+        <Card className="border-border/70">
+          <CardHeader><CardTitle className="text-base font-semibold">Reward records</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            {[...rewards, ...rewardPayments].length === 0 ? <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-sm text-muted-foreground">No reward record visible.</div> : [...rewards, ...rewardPayments].map((item) => (
+              <div key={`${item.contractId}-${item.status}`} className="rounded-xl border border-border/60 bg-background/60 p-4"><div className="flex items-center justify-between gap-3"><p className="font-medium">{item.instrumentId}</p><Badge variant="outline">{item.status}</Badge></div>{item.amount > 0 && <p className="mt-2 text-sm">{formatCurrency(item.amount)}</p>}</div>
+            ))}
+          </CardContent>
+        </Card>
+        <Card className="border-border/70">
+          <CardHeader><CardTitle className="text-base font-semibold">Settlement visibility</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            {[...settlements, ...closedContracts].length === 0 ? <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-sm text-muted-foreground">No settlement record visible.</div> : [...settlements, ...closedContracts].map((item) => (
+              <div key={`${item.contractId}-${item.status}`} className="rounded-xl border border-border/60 bg-background/60 p-4"><div className="flex items-center justify-between gap-3"><p className="font-medium">{item.instrumentId}</p><Badge variant="outline">{item.status}</Badge></div></div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="mt-6 border-border/70">
+        <CardHeader><CardTitle className="text-base font-semibold">Reports visible to payment verifier</CardTitle><CardDescription>These may be empty if the Daml template does not observe the payment verifier.</CardDescription></CardHeader>
+        <CardContent className="grid gap-3 lg:grid-cols-2">
+          {[...reports, ...acceptedReports].length === 0 ? <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-sm text-muted-foreground lg:col-span-2">No report visible.</div> : [...reports, ...acceptedReports].map((item) => (
+            <div key={item.contractId} className="rounded-xl border border-border/60 bg-background/60 p-4"><p className="font-medium">{item.instrumentId}</p><p className="text-sm text-muted-foreground">{item.periodLabel} - {item.reportHash}</p></div>
+          ))}
+        </CardContent>
+      </Card>
+    </>
+  );
+}
+
 export default function ReportsPage() {
   const { session } = useSession();
 
@@ -625,6 +1038,18 @@ export default function ReportsPage() {
 
   if (session.role === 'INVESTOR') {
     return <InvestorReportsWorkspace token={session.accessToken} />;
+  }
+
+  if (session.role === 'LEGAL_ADMIN') {
+    return <InvestorReportsWorkspace token={session.accessToken} roleLabel="Legal admin" />;
+  }
+
+  if (session.role === 'AUDITOR') {
+    return <AuditorReportsWorkspace token={session.accessToken} />;
+  }
+
+  if (session.role === 'PAYMENT_VERIFIER') {
+    return <PaymentVerifierReportsWorkspace token={session.accessToken} />;
   }
 
   return (

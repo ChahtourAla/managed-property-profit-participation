@@ -92,6 +92,10 @@ export type CreateSubscriptionPayload = {
   paymentReference: string;
 };
 
+export type AcceptReportPayload = {
+  auditor?: string;
+};
+
 const request = async <T>(path: string, options: RequestOptions) => {
   const { token, body, headers, ...rest } = options;
   const response = await fetch(`${BACKEND_BASE_URL}/api${path}`, {
@@ -332,6 +336,18 @@ export async function getReportsByInstrument(
     token,
   });
   return normalizeEvents(response);
+}
+
+export async function acceptReport(
+  token: string,
+  reportCid: string,
+  payload: AcceptReportPayload = {},
+) {
+  return request<unknown>(`/reports/${reportCid}/accept`, {
+    method: 'POST',
+    token,
+    body: payload,
+  });
 }
 
 export async function submitFinalReconciliation(

@@ -493,6 +493,109 @@ function EasycoinDraftReview({ token }: EasycoinDraftReviewProps) {
   );
 }
 
+function AuditorContractReview({
+  token,
+  roleLabel = 'Auditor',
+}: {
+  token: string;
+  roleLabel?: 'Auditor' | 'Legal admin';
+}) {
+  const [drafts, setDrafts] = React.useState<DraftRecord[]>([]);
+  const [validatedContracts, setValidatedContracts] = React.useState<DraftRecord[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+
+  const loadData = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const [draftResponse, validatedResponse] = await Promise.all([
+        getOwnerDrafts(token),
+        getValidatedContracts(token),
+      ]);
+
+      setDrafts(
+        draftResponse
+          .map((event) => normalizeDraftRecord(event, 'Draft'))
+          .filter(Boolean) as DraftRecord[]
+      );
+      setValidatedContracts(
+        validatedResponse
+          .map((event) => normalizeDraftRecord(event, 'Validated'))
+          .filter(Boolean) as DraftRecord[]
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  React.useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      await loadData();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <PageHeader
+        title={`${roleLabel} contract review`}
+        description={`Read owner drafts and validated managed contracts visible to the ${roleLabel.toLowerCase()} party.`}
+      >
+        <Button variant="outline" size="sm" className="gap-2" onClick={refresh} disabled={refreshing}>
+          {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          Refresh
+        </Button>
+      </PageHeader>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Card className="border-border/70">
+          <CardHeader className="pb-2">
+            <CardDescription>Draft contracts</CardDescription>
+            <CardTitle className="text-2xl">{drafts.length}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card className="border-border/70">
+          <CardHeader className="pb-2">
+            <CardDescription>Validated contracts</CardDescription>
+            <CardTitle className="text-2xl">{validatedContracts.length}</CardTitle>
+          </CardHeader>
+        </Card>
+      </div>
+
+      <div className="mt-6 grid gap-4">
+        <DraftTable
+          title="Drafts visible to auditor"
+          description={`Owner-submitted contracts visible to ${roleLabel.toLowerCase()} for read-only review.`}
+          rows={drafts}
+          emptyLabel={`No draft is visible to this ${roleLabel.toLowerCase()}.`}
+          badgeLabel="Read-only"
+        />
+        <DraftTable
+          title="Validated contracts"
+          description="Validated contracts available for compliance and audit visibility."
+          rows={validatedContracts}
+          emptyLabel={`No validated contract is visible to this ${roleLabel.toLowerCase()}.`}
+          badgeLabel="Read-only"
+        />
+      </div>
+    </>
+  );
+}
+
 export default function PropertiesPage() {
   const { session, ready } = useSession();
   const [form, setForm] = React.useState<DraftFormState>(initialFormState);
@@ -601,6 +704,14 @@ export default function PropertiesPage() {
   if (session.role !== 'OWNER') {
     if (session.role === 'EASYCOIN') {
       return <EasycoinDraftReview token={session.accessToken} />;
+    }
+
+    if (session.role === 'AUDITOR') {
+      return <AuditorContractReview token={session.accessToken} />;
+    }
+
+    if (session.role === 'LEGAL_ADMIN') {
+      return <AuditorContractReview token={session.accessToken} roleLabel="Legal admin" />;
     }
 
     return (
