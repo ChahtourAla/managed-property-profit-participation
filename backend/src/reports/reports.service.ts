@@ -131,7 +131,7 @@ export class ReportsService {
     return this.damlClient.exerciseChoice({
       templateId: TEMPLATE_IDS.PerformanceReport,
       contractId: reportCid,
-      choice: 'AcceptReport',
+      choice: 'AuditorAcceptReport',
       argument: {},
       actAs: [auditor],
     });
