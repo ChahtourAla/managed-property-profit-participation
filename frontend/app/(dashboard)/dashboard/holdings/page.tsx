@@ -11,6 +11,8 @@ import {
   getHoldings,
   getHoldingsByHolder,
   getHoldingsByInstrument,
+  redeemAllHoldings,
+  redeemHolding,
   toNumber,
   toStringValue,
 } from '@/lib/platform-api';
@@ -89,6 +91,11 @@ export default function HoldingsPage() {
   const [holdingCid, setHoldingCid] = React.useState('');
   const [loading, setLoading] = React.useState(true);
   const [refreshing, setRefreshing] = React.useState(false);
+  const [burnReferencePrefix, setBurnReferencePrefix] = React.useState('BURN-INSTR-MPC-001');
+  const [redeemClosedCid, setRedeemClosedCid] = React.useState('');
+  const [redeemHoldingCid, setRedeemHoldingCid] = React.useState('');
+  const [burnReference, setBurnReference] = React.useState('BURN-INSTR-MPC-001-INVESTOR-1');
+  const [pendingAction, setPendingAction] = React.useState<string | null>(null);
 
   const canUseHoldings = allowedRoles.includes(session.role);
 
@@ -136,6 +143,47 @@ export default function HoldingsPage() {
       await loadData();
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const handleRedeemAll = async () => {
+    if (!redeemClosedCid.trim()) {
+      toast.error('Enter a closed contract CID');
+      return;
+    }
+
+    setPendingAction('redeem-all');
+    try {
+      await redeemAllHoldings(session.accessToken, redeemClosedCid.trim(), {
+        burnReferencePrefix: burnReferencePrefix.trim() || undefined,
+      });
+      toast.success('All active holdings redeemed');
+      await loadData();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to redeem all holdings');
+    } finally {
+      setPendingAction(null);
+    }
+  };
+
+  const handleRedeemHolding = async () => {
+    if (!redeemClosedCid.trim() || !redeemHoldingCid.trim() || !burnReference.trim()) {
+      toast.error('Enter closed CID, holding CID, and burn reference');
+      return;
+    }
+
+    setPendingAction(redeemHoldingCid.trim());
+    try {
+      await redeemHolding(session.accessToken, redeemClosedCid.trim(), {
+        holdingCid: redeemHoldingCid.trim(),
+        burnReference: burnReference.trim(),
+      });
+      toast.success('Holding redeemed and burned');
+      await loadData();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to redeem holding');
+    } finally {
+      setPendingAction(null);
     }
   };
 
@@ -250,6 +298,71 @@ export default function HoldingsPage() {
           )}
         </CardContent>
       </Card>
+
+      {session.role === 'EASYCOIN' ? (
+        <Card className="mt-6 border-border/70">
+          <CardHeader>
+            <CardTitle className="text-base font-semibold">Easycoin redemption</CardTitle>
+            <CardDescription>
+              Redeem and burn holdings after the managed contract is closed.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 lg:grid-cols-2">
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Closed contract CID</Label>
+                <Input
+                  value={redeemClosedCid}
+                  onChange={(event) => setRedeemClosedCid(event.target.value)}
+                  placeholder="00f7c1..."
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Burn reference prefix</Label>
+                <Input
+                  value={burnReferencePrefix}
+                  onChange={(event) => setBurnReferencePrefix(event.target.value)}
+                  placeholder="BURN-INSTR-MPC-001"
+                />
+              </div>
+              <Button
+                className="gap-2"
+                onClick={handleRedeemAll}
+                disabled={pendingAction === 'redeem-all'}
+              >
+                {pendingAction === 'redeem-all' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                Redeem all holdings
+              </Button>
+            </div>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Holding CID</Label>
+                <Input
+                  value={redeemHoldingCid}
+                  onChange={(event) => setRedeemHoldingCid(event.target.value)}
+                  placeholder="00f7c1..."
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Burn reference</Label>
+                <Input
+                  value={burnReference}
+                  onChange={(event) => setBurnReference(event.target.value)}
+                  placeholder="BURN-INSTR-MPC-001-INVESTOR-1"
+                />
+              </div>
+              <Button
+                className="gap-2"
+                onClick={handleRedeemHolding}
+                disabled={pendingAction === redeemHoldingCid.trim() && redeemHoldingCid.trim().length > 0}
+              >
+                {pendingAction === redeemHoldingCid.trim() ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                Redeem holding
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
     </>
   );
 }

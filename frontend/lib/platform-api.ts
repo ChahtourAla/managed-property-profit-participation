@@ -85,6 +85,17 @@ export type ConfirmRewardPaymentPayload = {
   rewardPaymentReference: string;
 };
 
+export type RedeemHoldingPayload = {
+  holdingCid: string;
+  burnReference: string;
+  easycoin?: string;
+};
+
+export type RedeemAllHoldingsPayload = {
+  burnReferencePrefix?: string;
+  easycoin?: string;
+};
+
 export type CreateSubscriptionPayload = {
   instrumentId: string;
   requestedUnits: number;
@@ -542,4 +553,28 @@ export async function getRedemptionRecordsByInstrument(
     token,
   });
   return normalizeEvents(response);
+}
+
+export async function redeemHolding(
+  token: string,
+  closedCid: string,
+  payload: RedeemHoldingPayload,
+) {
+  return request<unknown>(`/redemptions/${closedCid}/redeem`, {
+    method: 'POST',
+    token,
+    body: payload,
+  });
+}
+
+export async function redeemAllHoldings(
+  token: string,
+  closedCid: string,
+  payload: RedeemAllHoldingsPayload,
+) {
+  return request<unknown>(`/redemptions/${closedCid}/redeem-all`, {
+    method: 'POST',
+    token,
+    body: payload,
+  });
 }
