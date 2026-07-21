@@ -17,6 +17,7 @@ import {
   getSettlements,
   getSubscriptionFundingConfirmations,
   submitFinalReconciliation,
+  confirmRewardPayment,
   toNumber,
   toStringValue,
 } from '@/lib/platform-api';
@@ -503,6 +504,7 @@ type InvestorTransactionRecord = {
   status: string;
   amount?: number;
   reference?: string;
+  recipient?: string;
 };
 
 function InvestorTransactionsWorkspace({
@@ -727,6 +729,8 @@ function PaymentVerifierTransactionsWorkspace({ token }: { token: string }) {
   const [fundingConfirmations, setFundingConfirmations] = React.useState<InvestorTransactionRecord[]>([]);
   const [rewards, setRewards] = React.useState<InvestorTransactionRecord[]>([]);
   const [rewardPayments, setRewardPayments] = React.useState<InvestorTransactionRecord[]>([]);
+  const [rewardReferences, setRewardReferences] = React.useState<Record<string, string>>({});
+  const [pendingRewardAction, setPendingRewardAction] = React.useState<string | null>(null);
   const [closedContracts, setClosedContracts] = React.useState<InvestorTransactionRecord[]>([]);
   const [redemptions, setRedemptions] = React.useState<InvestorTransactionRecord[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -787,8 +791,33 @@ function PaymentVerifierTransactionsWorkspace({ token }: { token: string }) {
           status: toStringValue(args.status, 'PAYMENT_PENDING'),
         };
       };
-      setRewards(rewardResponse.map(mapReward).filter((item) => item.instrumentId));
+      setRewards(rewardResponse.map((event) => {
+        const args = getDamlCreateArguments<{ instrumentId?: unknown; rewardAmount?: unknown; recipient?: unknown; rewardPaymentReference?: unknown; status?: unknown }>({
+          contractId: String(event.contractId),
+          createArguments: event.createArguments,
+        });
+        return {
+          contractId: String(event.contractId),
+          instrumentId: toStringValue(args.instrumentId, ''),
+          amount: toNumber(args.rewardAmount),
+          reference: toStringValue(args.rewardPaymentReference, ''),
+          recipient: toStringValue(args.recipient, ''),
+          status: toStringValue(args.status, 'PAYMENT_PENDING'),
+        };
+      }).filter((item) => item.instrumentId));
       setRewardPayments(rewardPaymentResponse.map(mapReward).filter((item) => item.instrumentId));
+      setRewardReferences((current) => {
+        const next = { ...current };
+        rewardResponse.forEach((event) => {
+          const args = getDamlCreateArguments<{ rewardPaymentReference?: unknown }>({
+            contractId: String(event.contractId),
+            createArguments: event.createArguments,
+          });
+          const defaultReference = `BANK-REWARD-PAYMENT-${String(event.contractId).slice(0, 6).toUpperCase()}`;
+          next[String(event.contractId)] ??= toStringValue(args.rewardPaymentReference, defaultReference);
+        });
+        return next;
+      });
       setClosedContracts(
         closedResponse.map((event) => {
           const args = getDamlCreateArguments<{ instrumentId?: unknown; closureNote?: unknown; status?: unknown }>({
@@ -836,6 +865,25 @@ function PaymentVerifierTransactionsWorkspace({ token }: { token: string }) {
     }
   };
 
+  const handleConfirmRewardPayment = async (rewardCid: string) => {
+    const rewardPaymentReference = rewardReferences[rewardCid]?.trim();
+    if (!rewardPaymentReference) {
+      toast.error('Enter a reward payment reference');
+      return;
+    }
+
+    setPendingRewardAction(rewardCid);
+    try {
+      await confirmRewardPayment(token, rewardCid, { rewardPaymentReference });
+      toast.success('Reward payment confirmed');
+      await loadData();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to confirm reward payment');
+    } finally {
+      setPendingRewardAction(null);
+    }
+  };
+
   const records = [
     ...fundingConfirmations,
     ...settlements,
@@ -871,6 +919,52 @@ function PaymentVerifierTransactionsWorkspace({ token }: { token: string }) {
         <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Paid</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{rewardPayments.length}</span></CardContent></Card>
         <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Redemptions</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{redemptions.length}</span></CardContent></Card>
       </div>
+
+      <Card className="mt-6 border-border/70">
+        <CardHeader>
+          <CardTitle className="text-base font-semibold">Pending reward confirmations</CardTitle>
+          <CardDescription>Confirm reward payments for pending reward records.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {rewards.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-sm text-muted-foreground">
+              No pending reward payments.
+            </div>
+          ) : (
+            rewards.map((item) => (
+              <div key={item.contractId} className="rounded-xl border border-border/60 bg-background/60 p-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="font-medium">{item.recipient || item.instrumentId}</p>
+                    <p className="truncate text-sm text-muted-foreground">{item.contractId}</p>
+                    <p className="mt-2 text-sm">{formatCurrency(item.amount ?? 0)}</p>
+                  </div>
+                  <StatusBadge status={item.status} />
+                </div>
+                <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    value={rewardReferences[item.contractId] ?? ''}
+                    onChange={(e) => setRewardReferences((current) => ({ ...current, [item.contractId]: e.target.value }))}
+                    placeholder="BANK-REWARD-PAYMENT-INVESTOR-1"
+                  />
+                  <Button
+                    className="gap-2"
+                    onClick={() => handleConfirmRewardPayment(item.contractId)}
+                    disabled={pendingRewardAction === item.contractId}
+                  >
+                    {pendingRewardAction === item.contractId ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="h-4 w-4" />
+                    )}
+                    Confirm payment
+                  </Button>
+                </div>
+              </div>
+            ))
+          )}
+        </CardContent>
+      </Card>
 
       <Card className="mt-6 border-border/70">
         <CardHeader>
