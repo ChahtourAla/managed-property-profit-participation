@@ -51,6 +51,13 @@ export const mainNav: NavGroup[] = [
         roles: ['OWNER', 'EASYCOIN', 'INVESTOR', 'ADMIN'],
       },
       {
+        title: 'Funding Confirmation',
+        href: '/dashboard/investments',
+        icon: Coins,
+        description: 'Confirm investor upfront payment receipts',
+        roles: ['PAYMENT_VERIFIER'],
+      },
+      {
         title: 'Performance & Settlement',
         href: '/dashboard/reports',
         icon: FileText,

@@ -148,13 +148,13 @@ const roleActionBlocks = {
     {
       title: 'Funding confirmation',
       description: 'Confirm upfront investor funding.',
-      href: '/dashboard/transactions',
+      href: '/dashboard/investments',
       icon: Wallet,
     },
     {
-      title: 'Reward payment confirmation',
-      description: 'Confirm reward transfers after settlement.',
-      href: '/dashboard/reports',
+      title: 'Funding confirmation trail',
+      description: 'Review confirmed funding events and lifecycle records.',
+      href: '/dashboard/transactions',
       icon: BadgeCheck,
     },
   ],

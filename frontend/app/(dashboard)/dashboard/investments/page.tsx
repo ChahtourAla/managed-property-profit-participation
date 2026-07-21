@@ -9,7 +9,6 @@ import { useSession } from '@/lib/session';
 import {
   approveInvestor,
   confirmFunding,
-  confirmRewardPayment,
   createSubscription,
   createInstrument,
   getApprovedInvestors,
@@ -1656,22 +1655,10 @@ type PaymentVerifierSubscriptionRecord = {
   status: string;
 };
 
-type PaymentVerifierRewardRecord = {
-  contractId: string;
-  recipient: string;
-  instrumentId: string;
-  rewardAmount: number;
-  status: string;
-};
-
 function PaymentVerifierInvestmentsWorkspace({ token }: { token: string }) {
   const [subscriptions, setSubscriptions] = React.useState<PaymentVerifierSubscriptionRecord[]>([]);
   const [fundingConfirmations, setFundingConfirmations] = React.useState<AuditorLedgerItem[]>([]);
-  const [holdings, setHoldings] = React.useState<AuditorLedgerItem[]>([]);
-  const [rewards, setRewards] = React.useState<PaymentVerifierRewardRecord[]>([]);
-  const [rewardConfirmations, setRewardConfirmations] = React.useState<AuditorLedgerItem[]>([]);
   const [fundingRefs, setFundingRefs] = React.useState<Record<string, string>>({});
-  const [rewardRefs, setRewardRefs] = React.useState<Record<string, string>>({});
   const [loading, setLoading] = React.useState(true);
   const [refreshing, setRefreshing] = React.useState(false);
   const [pendingAction, setPendingAction] = React.useState<string | null>(null);
@@ -1679,13 +1666,10 @@ function PaymentVerifierInvestmentsWorkspace({ token }: { token: string }) {
   const loadData = React.useCallback(async () => {
     setLoading(true);
     try {
-      const [subscriptionResponse, fundingResponse, holdingResponse, rewardResponse, rewardConfirmationResponse] =
+      const [subscriptionResponse, fundingResponse] =
         await Promise.all([
           getSubscriptions(token),
           getSubscriptionFundingConfirmations(token),
-          getHoldings(token),
-          getPaymentRewards(token),
-          getRewardPaymentConfirmations(token),
         ]);
 
       const normalizedSubscriptions = subscriptionResponse
@@ -1727,56 +1711,12 @@ function PaymentVerifierInvestmentsWorkspace({ token }: { token: string }) {
         };
       };
 
-      const mapHolding = (event: { contractId: string; createArguments?: Record<string, unknown> }) => {
-        const args = getDamlCreateArguments<{
-          holder?: unknown;
-          instrumentIdText?: unknown;
-          amount?: unknown;
-          status?: unknown;
-        }>({ contractId: String(event.contractId), createArguments: event.createArguments });
-        return {
-          contractId: String(event.contractId),
-          instrumentId: toStringValue(args.instrumentIdText, ''),
-          label: toStringValue(args.holder, ''),
-          amount: toNumber(args.amount),
-          status: toStringValue(args.status, 'ACTIVE'),
-        };
-      };
-
-      const normalizedRewards = rewardResponse
-        .map((event) => {
-          const args = getDamlCreateArguments<{
-            recipient?: unknown;
-            instrumentId?: unknown;
-            rewardAmount?: unknown;
-            status?: unknown;
-          }>({ contractId: String(event.contractId), createArguments: event.createArguments });
-          return {
-            contractId: String(event.contractId),
-            recipient: toStringValue(args.recipient, ''),
-            instrumentId: toStringValue(args.instrumentId, ''),
-            rewardAmount: toNumber(args.rewardAmount),
-            status: toStringValue(args.status, 'PAYMENT_PENDING'),
-          };
-        })
-        .filter((item) => item.instrumentId);
-
       setSubscriptions(normalizedSubscriptions as PaymentVerifierSubscriptionRecord[]);
       setFundingConfirmations(fundingResponse.map(mapFunding).filter((item) => item.instrumentId));
-      setHoldings(holdingResponse.map(mapHolding).filter((item) => item.instrumentId));
-      setRewards(normalizedRewards as PaymentVerifierRewardRecord[]);
-      setRewardConfirmations(rewardConfirmationResponse.map(mapFunding).filter((item) => item.instrumentId));
       setFundingRefs((current) => {
         const next = { ...current };
         normalizedSubscriptions.forEach((item) => {
           next[item.contractId] ??= `BANK-CONFIRMED-${item.paymentReference || item.instrumentId}`;
-        });
-        return next;
-      });
-      setRewardRefs((current) => {
-        const next = { ...current };
-        normalizedRewards.forEach((item) => {
-          next[item.contractId] ??= `BANK-REWARD-${item.instrumentId}`;
         });
         return next;
       });
@@ -1817,25 +1757,6 @@ function PaymentVerifierInvestmentsWorkspace({ token }: { token: string }) {
     }
   };
 
-  const handleConfirmReward = async (rewardCid: string) => {
-    const rewardPaymentReference = rewardRefs[rewardCid]?.trim();
-    if (!rewardPaymentReference) {
-      toast.error('Enter a reward payment reference');
-      return;
-    }
-
-    setPendingAction(rewardCid);
-    try {
-      await confirmRewardPayment(token, rewardCid, { rewardPaymentReference });
-      toast.success('Reward payment confirmed');
-      await loadData();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Unable to confirm reward payment');
-    } finally {
-      setPendingAction(null);
-    }
-  };
-
   if (loading) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
@@ -1847,8 +1768,8 @@ function PaymentVerifierInvestmentsWorkspace({ token }: { token: string }) {
   return (
     <>
       <PageHeader
-        title="Payment verification"
-        description="Confirm investor funding and reward payments from ledger-visible records."
+        title="Funding confirmation"
+        description="Confirm that investor upfront payment was received. The backend creates the FundingConfirmation, investor holding, and updates TokenSupply."
       >
         <Button variant="outline" size="sm" className="gap-2" onClick={refresh} disabled={refreshing}>
           {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
@@ -1857,17 +1778,17 @@ function PaymentVerifierInvestmentsWorkspace({ token }: { token: string }) {
       </PageHeader>
 
       <div className="grid gap-4 sm:grid-cols-4">
-        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Subscriptions</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{subscriptions.length}</span></CardContent></Card>
-        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Funded</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{fundingConfirmations.length}</span></CardContent></Card>
-        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Holdings</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{holdings.length}</span></CardContent></Card>
-        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Reward payments</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{rewardConfirmations.length}</span></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Pending subscriptions</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{subscriptions.length}</span></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Confirmed funding</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{fundingConfirmations.length}</span></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Requested units</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{subscriptions.reduce((sum, item) => sum + item.requestedUnits, 0)}</span></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Upfront amount</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{formatCurrency(subscriptions.reduce((sum, item) => sum + item.upfrontAmount, 0))}</span></CardContent></Card>
       </div>
 
-      <div className="mt-6 grid gap-4 xl:grid-cols-2">
+      <div className="mt-6 grid gap-4 xl:grid-cols-[1.25fr_0.75fr]">
         <Card className="border-border/70">
           <CardHeader>
-            <CardTitle className="text-base font-semibold">Confirm funding</CardTitle>
-            <CardDescription>Exercise `ConfirmFunding` on visible investor subscriptions.</CardDescription>
+            <CardTitle className="text-base font-semibold">Pending subscriptions</CardTitle>
+            <CardDescription>Uses `GET /subscriptions` and confirms with `POST /subscriptions/:subscriptionCid/confirm-funding`.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {subscriptions.length === 0 ? (
@@ -1880,6 +1801,7 @@ function PaymentVerifierInvestmentsWorkspace({ token }: { token: string }) {
                       <p className="font-medium">{item.instrumentId}</p>
                       <p className="truncate text-sm text-muted-foreground">{item.investor}</p>
                       <p className="mt-2 text-sm">{item.requestedUnits} units - {formatCurrency(item.upfrontAmount)}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Payment reference: {item.paymentReference}</p>
                     </div>
                     <StatusBadge status={item.status} />
                   </div>
@@ -1902,34 +1824,21 @@ function PaymentVerifierInvestmentsWorkspace({ token }: { token: string }) {
 
         <Card className="border-border/70">
           <CardHeader>
-            <CardTitle className="text-base font-semibold">Confirm reward payments</CardTitle>
-            <CardDescription>Exercise `ConfirmRewardPayment` on visible reward records.</CardDescription>
+            <CardTitle className="text-base font-semibold">Funding confirmations</CardTitle>
+            <CardDescription>Uses `GET /subscriptions/funding-confirmations` after successful confirmation.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {rewards.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-sm text-muted-foreground">No reward awaiting payment confirmation.</div>
+            {fundingConfirmations.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-sm text-muted-foreground">No funding confirmation yet.</div>
             ) : (
-              rewards.map((item) => (
+              fundingConfirmations.map((item) => (
                 <div key={item.contractId} className="rounded-xl border border-border/60 bg-background/60 p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="font-medium">{item.instrumentId}</p>
-                      <p className="truncate text-sm text-muted-foreground">{item.recipient}</p>
-                      <p className="mt-2 text-sm">{formatCurrency(item.rewardAmount)}</p>
-                    </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="font-medium">{item.instrumentId}</p>
                     <StatusBadge status={item.status} />
                   </div>
-                  <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-                    <Input
-                      value={rewardRefs[item.contractId] ?? ''}
-                      onChange={(e) => setRewardRefs((current) => ({ ...current, [item.contractId]: e.target.value }))}
-                      placeholder="BANK-REWARD-PAYMENT-INVESTOR-1"
-                    />
-                    <Button className="gap-2" onClick={() => handleConfirmReward(item.contractId)} disabled={pendingAction === item.contractId}>
-                      {pendingAction === item.contractId ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                      Confirm
-                    </Button>
-                  </div>
+                  <p className="mt-2 text-sm text-muted-foreground">{item.label}</p>
+                  {item.amount !== undefined && item.amount > 0 && <p className="mt-2 text-sm">{formatCurrency(item.amount)}</p>}
                 </div>
               ))
             )}
@@ -1937,32 +1846,14 @@ function PaymentVerifierInvestmentsWorkspace({ token }: { token: string }) {
         </Card>
       </div>
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-3">
-        <Card className="border-border/70">
-          <CardHeader><CardTitle className="text-base font-semibold">Funding confirmations</CardTitle></CardHeader>
-          <CardContent className="space-y-3">
-            {fundingConfirmations.length === 0 ? <div className="rounded-xl border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">No funding confirmation yet.</div> : fundingConfirmations.map((item) => (
-              <div key={item.contractId} className="rounded-xl border border-border/60 bg-background/60 p-4"><p className="font-medium">{item.instrumentId}</p><p className="text-sm text-muted-foreground">{item.label}</p></div>
-            ))}
-          </CardContent>
-        </Card>
-        <Card className="border-border/70">
-          <CardHeader><CardTitle className="text-base font-semibold">Holdings</CardTitle></CardHeader>
-          <CardContent className="space-y-3">
-            {holdings.length === 0 ? <div className="rounded-xl border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">No holding visible.</div> : holdings.map((item) => (
-              <div key={item.contractId} className="rounded-xl border border-border/60 bg-background/60 p-4"><p className="font-medium">{item.instrumentId}</p><p className="text-sm text-muted-foreground">{item.label}</p></div>
-            ))}
-          </CardContent>
-        </Card>
-        <Card className="border-border/70">
-          <CardHeader><CardTitle className="text-base font-semibold">Reward confirmations</CardTitle></CardHeader>
-          <CardContent className="space-y-3">
-            {rewardConfirmations.length === 0 ? <div className="rounded-xl border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">No reward payment confirmation yet.</div> : rewardConfirmations.map((item) => (
-              <div key={item.contractId} className="rounded-xl border border-border/60 bg-background/60 p-4"><p className="font-medium">{item.instrumentId}</p><p className="text-sm text-muted-foreground">{item.label}</p></div>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
+      <Card className="mt-6 border-border/70">
+        <CardHeader>
+          <CardTitle className="text-base font-semibold">Success result</CardTitle>
+          <CardDescription>
+            On success the backend creates a FundingConfirmation and investor holding. `supplyCid` is optional because the backend can find TokenSupply automatically.
+          </CardDescription>
+        </CardHeader>
+      </Card>
     </>
   );
 }
