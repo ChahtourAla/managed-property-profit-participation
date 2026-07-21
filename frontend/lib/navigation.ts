@@ -79,6 +79,13 @@ export const mainNav: NavGroup[] = [
         roles: ['EASYCOIN', 'AUDITOR', 'PAYMENT_VERIFIER', 'LEGAL_ADMIN', 'ADMIN'],
       },
       {
+        title: 'Demo Summary',
+        href: '/dashboard/demo-summary',
+        icon: FileText,
+        description: 'Final workflow state across validation, settlement, and redemption',
+        roles: ['OWNER', 'EASYCOIN', 'INVESTOR', 'AUDITOR', 'PAYMENT_VERIFIER', 'LEGAL_ADMIN', 'ADMIN'],
+      },
+      {
         title: 'Workflow Status',
         href: '/dashboard/settings',
         icon: Activity,
