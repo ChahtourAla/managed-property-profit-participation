@@ -98,7 +98,7 @@ const roleActionBlocks = {
     {
       title: 'Holdings and payout',
       description: 'See upfront liquidity and retained profit.',
-      href: '/dashboard/investments',
+      href: '/dashboard/holdings',
       icon: Wallet,
     },
   ],
@@ -126,7 +126,7 @@ const roleActionBlocks = {
     {
       title: 'Reward outlook',
       description: 'Check the expected settlement amount.',
-      href: '/dashboard/reports',
+      href: '/dashboard/holdings',
       icon: Wallet,
     },
   ],

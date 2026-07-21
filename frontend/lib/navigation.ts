@@ -51,6 +51,13 @@ export const mainNav: NavGroup[] = [
         roles: ['OWNER', 'EASYCOIN', 'INVESTOR', 'ADMIN'],
       },
       {
+        title: 'Holdings',
+        href: '/dashboard/holdings',
+        icon: Coins,
+        description: 'Active holdings before rewards and redemption',
+        roles: ['OWNER', 'INVESTOR', 'EASYCOIN', 'AUDITOR', 'LEGAL_ADMIN', 'PAYMENT_VERIFIER'],
+      },
+      {
         title: 'Funding Confirmation',
         href: '/dashboard/investments',
         icon: Coins,

@@ -1,0 +1,255 @@
+'use client';
+
+import * as React from 'react';
+import { Loader2, RefreshCw, Search } from 'lucide-react';
+import { toast } from 'sonner';
+
+import { useSession } from '@/lib/session';
+import {
+  getDamlCreateArguments,
+  getHoldingByCid,
+  getHoldings,
+  getHoldingsByHolder,
+  getHoldingsByInstrument,
+  toNumber,
+  toStringValue,
+} from '@/lib/platform-api';
+import type { AppRole } from '@/lib/role-config';
+import { PageHeader } from '@/components/dashboard/page-header';
+import { StatusBadge } from '@/components/dashboard/status-badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+
+type HoldingRecord = {
+  holdingCid: string;
+  holder: string;
+  instrumentId: string;
+  amount: number;
+  status: string;
+};
+
+const allowedRoles: AppRole[] = [
+  'OWNER',
+  'INVESTOR',
+  'EASYCOIN',
+  'AUDITOR',
+  'LEGAL_ADMIN',
+  'PAYMENT_VERIFIER',
+];
+
+function mapHolding(event: { contractId: string; createArguments?: Record<string, unknown> }): HoldingRecord {
+  const args = getDamlCreateArguments<{
+    holder?: unknown;
+    instrumentId?: unknown;
+    instrumentIdText?: unknown;
+    amount?: unknown;
+    units?: unknown;
+    status?: unknown;
+  }>({ contractId: String(event.contractId), createArguments: event.createArguments });
+
+  return {
+    holdingCid: String(event.contractId),
+    holder: toStringValue(args.holder, ''),
+    instrumentId: toStringValue(args.instrumentIdText ?? args.instrumentId, ''),
+    amount: toNumber(args.amount ?? args.units),
+    status: toStringValue(args.status, 'ACTIVE'),
+  };
+}
+
+function dedupeHoldings(items: HoldingRecord[]) {
+  const byCid = new Map<string, HoldingRecord>();
+
+  items.forEach((item) => {
+    if (item.holdingCid && item.instrumentId) {
+      byCid.set(item.holdingCid, item);
+    }
+  });
+
+  return Array.from(byCid.values());
+}
+
+export default function HoldingsPage() {
+  const { session } = useSession();
+  const [holdings, setHoldings] = React.useState<HoldingRecord[]>([]);
+  const [instrumentHoldings, setInstrumentHoldings] = React.useState<HoldingRecord[]>([]);
+  const [holderHoldings, setHolderHoldings] = React.useState<HoldingRecord[]>([]);
+  const [cidHolding, setCidHolding] = React.useState<HoldingRecord | null>(null);
+  const [instrumentId, setInstrumentId] = React.useState('INSTR-MPC-001');
+  const [holder, setHolder] = React.useState(session.partyId);
+  const [holdingCid, setHoldingCid] = React.useState('');
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+
+  const canUseHoldings = allowedRoles.includes(session.role);
+
+  const loadData = React.useCallback(async () => {
+    if (!canUseHoldings) return;
+
+    setLoading(true);
+    try {
+      const [holdingResponse, byInstrumentResponse, byHolderResponse, byCidResponse] = await Promise.all([
+        getHoldings(session.accessToken),
+        instrumentId.trim()
+          ? getHoldingsByInstrument(session.accessToken, instrumentId.trim()).catch(() => [])
+          : Promise.resolve([]),
+        holder.trim()
+          ? getHoldingsByHolder(session.accessToken, holder.trim()).catch(() => [])
+          : Promise.resolve([]),
+        holdingCid.trim()
+          ? getHoldingByCid(session.accessToken, holdingCid.trim()).catch(() => [])
+          : Promise.resolve([]),
+      ]);
+
+      const normalized = holdingResponse.map(mapHolding).filter((item) => item.instrumentId);
+      const byInstrument = byInstrumentResponse.map(mapHolding).filter((item) => item.instrumentId);
+      const byHolder = byHolderResponse.map(mapHolding).filter((item) => item.instrumentId);
+      const byCid = byCidResponse.map(mapHolding).filter((item) => item.instrumentId);
+
+      setHoldings(normalized);
+      setInstrumentHoldings(byInstrument);
+      setHolderHoldings(byHolder);
+      setCidHolding(byCid[0] ?? null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to load holdings');
+    } finally {
+      setLoading(false);
+    }
+  }, [canUseHoldings, holdingCid, holder, instrumentId, session.accessToken]);
+
+  React.useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      await loadData();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  if (!canUseHoldings) {
+    return (
+      <Card className="border-border/70">
+        <CardHeader>
+          <CardTitle>Holdings view</CardTitle>
+          <CardDescription>This screen is reserved for ledger-visible operational roles.</CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  const tableRows = dedupeHoldings([
+    ...holdings,
+    ...instrumentHoldings,
+    ...holderHoldings,
+    ...(cidHolding ? [cidHolding] : []),
+  ]);
+  const totalUnits = tableRows.reduce((sum, item) => sum + item.amount, 0);
+
+  return (
+    <>
+      <PageHeader
+        title="Holdings view"
+        description="Verify active holdings before rewards and redemption. Owners see retained units; investors see subscribed units where visible on the ledger."
+      >
+        <Button variant="outline" size="sm" className="gap-2" onClick={refresh} disabled={refreshing}>
+          {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          Refresh
+        </Button>
+      </PageHeader>
+
+      <div className="grid gap-4 sm:grid-cols-4">
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">All holdings</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{holdings.length}</span></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">By instrument</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{instrumentHoldings.length}</span></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">By holder</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{holderHoldings.length}</span></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Total units</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{totalUnits}</span></CardContent></Card>
+      </div>
+
+      <Card className="mt-6 border-border/70">
+        <CardHeader>
+          <CardTitle className="text-base font-semibold">Optional filters</CardTitle>
+          <CardDescription>Use instrument, holder, or Daml holding CID lookups to verify a specific active holding.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4 lg:grid-cols-[1fr_1fr_1fr_auto]">
+          <div className="space-y-2">
+            <Label>Instrument ID</Label>
+            <Input value={instrumentId} onChange={(event) => setInstrumentId(event.target.value)} placeholder="INSTR-MPC-001" />
+          </div>
+          <div className="space-y-2">
+            <Label>Holder party</Label>
+            <Input value={holder} onChange={(event) => setHolder(event.target.value)} placeholder={session.partyId} />
+          </div>
+          <div className="space-y-2">
+            <Label>Holding CID</Label>
+            <Input value={holdingCid} onChange={(event) => setHoldingCid(event.target.value)} placeholder="00f7c1..." />
+          </div>
+          <div className="flex items-end">
+            <Button className="w-full gap-2 lg:w-auto" onClick={refresh} disabled={refreshing}>
+              {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+              Apply
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="mt-6 border-border/70">
+        <CardHeader>
+          <CardTitle className="text-base font-semibold">Active holdings</CardTitle>
+          <CardDescription>Data from `GET /holdings`, `/holdings/instrument/:instrumentId`, `/holdings/party/:holder`, and `/holdings/cid/:holdingCid`.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {tableRows.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border/70 px-4 py-10 text-sm text-muted-foreground">
+              No active holding is visible for this role and filter.
+            </div>
+          ) : (
+            <div className="overflow-hidden rounded-xl border border-border/70">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Holder</TableHead>
+                    <TableHead>Instrument</TableHead>
+                    <TableHead className="text-right">Amount / units</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Daml holdingCid</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {tableRows.map((item) => (
+                    <TableRow key={item.holdingCid}>
+                      <TableCell className="max-w-[260px] truncate font-medium">{item.holder || 'Visible holder'}</TableCell>
+                      <TableCell>{item.instrumentId}</TableCell>
+                      <TableCell className="text-right font-medium">{item.amount}</TableCell>
+                      <TableCell><StatusBadge status={item.status} /></TableCell>
+                      <TableCell className="max-w-[320px] truncate text-xs text-muted-foreground">{item.holdingCid}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </>
+  );
+}
