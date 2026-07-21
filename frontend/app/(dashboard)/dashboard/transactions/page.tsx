@@ -20,6 +20,7 @@ import {
   toNumber,
   toStringValue,
 } from '@/lib/platform-api';
+import { localDamlParties } from '@/lib/role-config';
 import { formatCurrency } from '@/lib/format';
 import { PageHeader } from '@/components/dashboard/page-header';
 import { DataTable, type Column } from '@/components/dashboard/data-table';
@@ -34,6 +35,18 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
+
+const adminReaderParties = [
+  { label: 'Easycoin', value: localDamlParties.easycoin },
+  { label: 'Owner', value: localDamlParties.owner },
+  { label: 'Investor 1', value: localDamlParties.investor1 },
+  { label: 'Investor 2', value: localDamlParties.investor2 },
+  { label: 'Investor 3', value: localDamlParties.investor3 },
+  { label: 'Investor 4', value: localDamlParties.investor4 },
+  { label: 'Auditor', value: localDamlParties.auditor },
+  { label: 'Payment verifier', value: localDamlParties.paymentVerifier },
+  { label: 'Legal admin', value: localDamlParties.legalAdmin },
+];
 
 type SettlementRecord = {
   contractId: string;
@@ -885,6 +898,183 @@ function PaymentVerifierTransactionsWorkspace({ token }: { token: string }) {
   );
 }
 
+function AdminTransactionsWorkspace({ token }: { token: string }) {
+  const [readerParty, setReaderParty] = React.useState<string>(localDamlParties.easycoin);
+  const [instrumentId, setInstrumentId] = React.useState('INSTR-MPC-001');
+  const [settlements, setSettlements] = React.useState<InvestorTransactionRecord[]>([]);
+  const [fundingConfirmations, setFundingConfirmations] = React.useState<InvestorTransactionRecord[]>([]);
+  const [rewards, setRewards] = React.useState<InvestorTransactionRecord[]>([]);
+  const [rewardPayments, setRewardPayments] = React.useState<InvestorTransactionRecord[]>([]);
+  const [closedContracts, setClosedContracts] = React.useState<InvestorTransactionRecord[]>([]);
+  const [redemptions, setRedemptions] = React.useState<InvestorTransactionRecord[]>([]);
+  const [redemptionsByInstrument, setRedemptionsByInstrument] = React.useState<InvestorTransactionRecord[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+
+  const mapLifecycleRecord = React.useCallback((event: { contractId: string; createArguments?: Record<string, unknown> }) => {
+    const args = getDamlCreateArguments<{
+      instrumentId?: unknown;
+      investorRewardPool?: unknown;
+      upfrontAmount?: unknown;
+      rewardAmount?: unknown;
+      redeemedUnits?: unknown;
+      confirmedPaymentReference?: unknown;
+      rewardPaymentReference?: unknown;
+      closureNote?: unknown;
+      burnReference?: unknown;
+      status?: unknown;
+    }>({ contractId: String(event.contractId), createArguments: event.createArguments });
+
+    return {
+      contractId: String(event.contractId),
+      instrumentId: toStringValue(args.instrumentId, ''),
+      amount: toNumber(args.investorRewardPool ?? args.upfrontAmount ?? args.rewardAmount ?? args.redeemedUnits),
+      reference: toStringValue(
+        args.confirmedPaymentReference ?? args.rewardPaymentReference ?? args.closureNote ?? args.burnReference,
+        '',
+      ),
+      status: toStringValue(args.status, 'Visible'),
+    };
+  }, []);
+
+  const loadData = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const [
+        settlementResponse,
+        fundingResponse,
+        rewardResponse,
+        rewardPaymentResponse,
+        closedResponse,
+        redemptionResponse,
+        redemptionByInstrumentResponse,
+      ] = await Promise.all([
+        getSettlements(token, readerParty),
+        getSubscriptionFundingConfirmations(token, readerParty),
+        getRewardRecords(token, readerParty),
+        getRewardPaymentConfirmations(token, readerParty),
+        getClosedContracts(token, readerParty),
+        getRedemptionRecords(token, readerParty),
+        instrumentId.trim()
+          ? getRedemptionRecordsByInstrument(token, instrumentId.trim(), readerParty).catch(() => [])
+          : Promise.resolve([]),
+      ]);
+
+      setSettlements(settlementResponse.map(mapLifecycleRecord).filter((item) => item.instrumentId));
+      setFundingConfirmations(fundingResponse.map(mapLifecycleRecord).filter((item) => item.instrumentId));
+      setRewards(rewardResponse.map(mapLifecycleRecord).filter((item) => item.instrumentId));
+      setRewardPayments(rewardPaymentResponse.map(mapLifecycleRecord).filter((item) => item.instrumentId));
+      setClosedContracts(closedResponse.map(mapLifecycleRecord).filter((item) => item.instrumentId));
+      setRedemptions(redemptionResponse.map(mapLifecycleRecord).filter((item) => item.instrumentId));
+      setRedemptionsByInstrument(redemptionByInstrumentResponse.map(mapLifecycleRecord).filter((item) => item.instrumentId));
+    } finally {
+      setLoading(false);
+    }
+  }, [instrumentId, mapLifecycleRecord, readerParty, token]);
+
+  React.useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      await loadData();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const records = [
+    ...fundingConfirmations,
+    ...settlements,
+    ...rewards,
+    ...rewardPayments,
+    ...closedContracts,
+    ...redemptions,
+  ];
+
+  const renderRecords = (items: InvestorTransactionRecord[], empty: string) =>
+    items.length === 0 ? (
+      <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-sm text-muted-foreground">{empty}</div>
+    ) : (
+      items.map((item) => (
+        <div key={`${item.contractId}-${item.status}`} className="rounded-xl border border-border/60 bg-background/60 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <p className="font-medium">{item.instrumentId}</p>
+            <StatusBadge status={item.status} />
+          </div>
+          {item.amount !== undefined && item.amount > 0 && <p className="mt-3 text-sm">{formatCurrency(item.amount)}</p>}
+          {item.reference && <p className="mt-1 text-xs text-muted-foreground">{item.reference}</p>}
+        </div>
+      ))
+    );
+
+  if (loading) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <PageHeader
+        title="Admin transaction console"
+        description="Read Admin-authorized lifecycle records by selected Daml party."
+      >
+        <Button variant="outline" size="sm" className="gap-2" onClick={refresh} disabled={refreshing}>
+          {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          Refresh
+        </Button>
+      </PageHeader>
+
+      <Card className="border-border/70">
+        <CardHeader>
+          <CardTitle className="text-base font-semibold">Admin reader controls</CardTitle>
+          <CardDescription>Select the ledger party and optional instrument ID for redemption lookup.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 lg:grid-cols-[1fr_0.7fr]">
+          <Select value={readerParty} onValueChange={setReaderParty}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {adminReaderParties.map((party) => (
+                <SelectItem key={party.value} value={party.value}>{party.label} - {party.value}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Input value={instrumentId} onChange={(event) => setInstrumentId(event.target.value)} placeholder="INSTR-MPC-001" />
+        </CardContent>
+      </Card>
+
+      <div className="mt-6 grid gap-4 sm:grid-cols-4">
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Funding</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{fundingConfirmations.length}</span></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Settlements</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{settlements.length}</span></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Rewards</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{rewards.length + rewardPayments.length}</span></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Redemptions</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{redemptions.length}</span></CardContent></Card>
+      </div>
+
+      <div className="mt-6 grid gap-4 lg:grid-cols-[0.85fr_1.15fr]">
+        <Card className="border-border/70">
+          <CardHeader>
+            <CardTitle className="text-base font-semibold">Redemptions by instrument</CardTitle>
+            <CardDescription>Uses `/redemptions/instrument/:instrumentId` with selected reader party.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">{renderRecords(redemptionsByInstrument, 'No redemption visible for this instrument and party.')}</CardContent>
+        </Card>
+        <Card className="border-border/70">
+          <CardHeader>
+            <CardTitle className="text-base font-semibold">Lifecycle records</CardTitle>
+            <CardDescription>Funding, settlement, rewards, payment confirmations, closure, and burns.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 sm:grid-cols-2">{renderRecords(records, 'No lifecycle record visible for this party.')}</CardContent>
+        </Card>
+      </div>
+    </>
+  );
+}
+
 export default function TransactionsPage() {
   const { session } = useSession();
 
@@ -909,6 +1099,10 @@ export default function TransactionsPage() {
 
   if (session.role === 'PAYMENT_VERIFIER') {
     return <PaymentVerifierTransactionsWorkspace token={session.accessToken} />;
+  }
+
+  if (session.role === 'ADMIN') {
+    return <AdminTransactionsWorkspace token={session.accessToken} />;
   }
 
   return (

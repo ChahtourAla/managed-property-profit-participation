@@ -596,6 +596,26 @@ function AuditorContractReview({
   );
 }
 
+function AdminContractsNotice() {
+  return (
+    <>
+      <PageHeader
+        title="Admin contract access"
+        description="The current backend guards do not expose contract draft or validated-contract endpoints to ADMIN."
+      />
+      <Card className="border-border/70">
+        <CardHeader>
+          <CardTitle className="text-xl">Contracts are role-scoped</CardTitle>
+          <CardDescription>
+            Use OWNER, EASYCOIN, AUDITOR, or LEGAL_ADMIN to read contract records. Admin can inspect reporting,
+            subscriptions, holdings, settlements, payments, and redemptions from their dedicated pages.
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    </>
+  );
+}
+
 export default function PropertiesPage() {
   const { session, ready } = useSession();
   const [form, setForm] = React.useState<DraftFormState>(initialFormState);
@@ -712,6 +732,10 @@ export default function PropertiesPage() {
 
     if (session.role === 'LEGAL_ADMIN') {
       return <AuditorContractReview token={session.accessToken} roleLabel="Legal admin" />;
+    }
+
+    if (session.role === 'ADMIN') {
+      return <AdminContractsNotice />;
     }
 
     return (

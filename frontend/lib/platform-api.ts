@@ -199,16 +199,27 @@ export function toStringValue(value: unknown, fallback = '') {
   return String(value);
 }
 
-export async function getOwnerDrafts(token: string) {
-  const response = await request<unknown>('/contracts/drafts', {
+const withQuery = (path: string, query?: Record<string, string | undefined>) => {
+  const params = new URLSearchParams();
+
+  Object.entries(query ?? {}).forEach(([key, value]) => {
+    if (value) params.set(key, value);
+  });
+
+  const search = params.toString();
+  return search ? `${path}?${search}` : path;
+};
+
+export async function getOwnerDrafts(token: string, party?: string) {
+  const response = await request<unknown>(withQuery('/contracts/drafts', { party }), {
     method: 'GET',
     token,
   });
   return normalizeEvents(response);
 }
 
-export async function getValidatedContracts(token: string) {
-  const response = await request<unknown>('/contracts/validated', {
+export async function getValidatedContracts(token: string, party?: string) {
+  const response = await request<unknown>(withQuery('/contracts/validated', { party }), {
     method: 'GET',
     token,
   });
@@ -246,8 +257,8 @@ export async function validateOwnerDraft(token: string, contractId: string) {
   });
 }
 
-export async function getApprovedInvestors(token: string) {
-  const response = await request<unknown>('/investors/approved', {
+export async function getApprovedInvestors(token: string, party?: string) {
+  const response = await request<unknown>(withQuery('/investors/approved', { party }), {
     method: 'GET',
     token,
   });
@@ -265,24 +276,24 @@ export async function approveInvestor(
   });
 }
 
-export async function getInstruments(token: string) {
-  const response = await request<unknown>('/instruments', {
+export async function getInstruments(token: string, party?: string) {
+  const response = await request<unknown>(withQuery('/instruments', { party }), {
     method: 'GET',
     token,
   });
   return normalizeEvents(response);
 }
 
-export async function getInstrumentById(token: string, instrumentId: string) {
-  const response = await request<unknown>(`/instruments/${instrumentId}`, {
+export async function getInstrumentById(token: string, instrumentId: string, party?: string) {
+  const response = await request<unknown>(withQuery(`/instruments/${instrumentId}`, { party }), {
     method: 'GET',
     token,
   });
   return normalizeEvents(response);
 }
 
-export async function getInstrumentSupply(token: string, instrumentId: string) {
-  const response = await request<unknown>(`/instruments/${instrumentId}/supply`, {
+export async function getInstrumentSupply(token: string, instrumentId: string, party?: string) {
+  const response = await request<unknown>(withQuery(`/instruments/${instrumentId}/supply`, { party }), {
     method: 'GET',
     token,
   });
@@ -311,16 +322,16 @@ export async function createPerformanceReport(
   });
 }
 
-export async function getReports(token: string) {
-  const response = await request<unknown>('/reports', {
+export async function getReports(token: string, party?: string) {
+  const response = await request<unknown>(withQuery('/reports', { party }), {
     method: 'GET',
     token,
   });
   return normalizeEvents(response);
 }
 
-export async function getAcceptedReports(token: string) {
-  const response = await request<unknown>('/reports/accepted', {
+export async function getAcceptedReports(token: string, party?: string) {
+  const response = await request<unknown>(withQuery('/reports/accepted', { party }), {
     method: 'GET',
     token,
   });
@@ -330,8 +341,9 @@ export async function getAcceptedReports(token: string) {
 export async function getReportsByInstrument(
   token: string,
   instrumentId: string,
+  party?: string,
 ) {
-  const response = await request<unknown>(`/reports/instrument/${instrumentId}`, {
+  const response = await request<unknown>(withQuery(`/reports/instrument/${instrumentId}`, { party }), {
     method: 'GET',
     token,
   });
@@ -361,24 +373,24 @@ export async function submitFinalReconciliation(
   });
 }
 
-export async function getSettlements(token: string) {
-  const response = await request<unknown>('/settlements', {
+export async function getSettlements(token: string, party?: string) {
+  const response = await request<unknown>(withQuery('/settlements', { party }), {
     method: 'GET',
     token,
   });
   return normalizeEvents(response);
 }
 
-export async function getRewardRecords(token: string) {
-  const response = await request<unknown>('/settlements/rewards', {
+export async function getRewardRecords(token: string, party?: string) {
+  const response = await request<unknown>(withQuery('/settlements/rewards', { party }), {
     method: 'GET',
     token,
   });
   return normalizeEvents(response);
 }
 
-export async function getClosedContracts(token: string) {
-  const response = await request<unknown>('/settlements/closed', {
+export async function getClosedContracts(token: string, party?: string) {
+  const response = await request<unknown>(withQuery('/settlements/closed', { party }), {
     method: 'GET',
     token,
   });
@@ -409,16 +421,16 @@ export async function closeSettlement(
   });
 }
 
-export async function getSubscriptionFundingConfirmations(token: string) {
-  const response = await request<unknown>('/subscriptions/funding-confirmations', {
+export async function getSubscriptionFundingConfirmations(token: string, party?: string) {
+  const response = await request<unknown>(withQuery('/subscriptions/funding-confirmations', { party }), {
     method: 'GET',
     token,
   });
   return normalizeEvents(response);
 }
 
-export async function getSubscriptions(token: string) {
-  const response = await request<unknown>('/subscriptions', {
+export async function getSubscriptions(token: string, party?: string) {
+  const response = await request<unknown>(withQuery('/subscriptions', { party }), {
     method: 'GET',
     token,
   });
@@ -448,16 +460,16 @@ export async function confirmFunding(
   });
 }
 
-export async function getRewardPaymentConfirmations(token: string) {
-  const response = await request<unknown>('/payments/reward-confirmations', {
+export async function getRewardPaymentConfirmations(token: string, party?: string) {
+  const response = await request<unknown>(withQuery('/payments/reward-confirmations', { party }), {
     method: 'GET',
     token,
   });
   return normalizeEvents(response);
 }
 
-export async function getPaymentRewards(token: string) {
-  const response = await request<unknown>('/payments/rewards', {
+export async function getPaymentRewards(token: string, party?: string) {
+  const response = await request<unknown>(withQuery('/payments/rewards', { party }), {
     method: 'GET',
     token,
   });
@@ -476,16 +488,16 @@ export async function confirmRewardPayment(
   });
 }
 
-export async function getHoldings(token: string) {
-  const response = await request<unknown>('/holdings', {
+export async function getHoldings(token: string, party?: string) {
+  const response = await request<unknown>(withQuery('/holdings', { party }), {
     method: 'GET',
     token,
   });
   return normalizeEvents(response);
 }
 
-export async function getHoldingsByHolder(token: string, holder: string) {
-  const response = await request<unknown>(`/holdings/party/${holder}`, {
+export async function getHoldingsByHolder(token: string, holder: string, reader?: string) {
+  const response = await request<unknown>(withQuery(`/holdings/party/${holder}`, { reader }), {
     method: 'GET',
     token,
   });
@@ -495,24 +507,25 @@ export async function getHoldingsByHolder(token: string, holder: string) {
 export async function getHoldingsByInstrument(
   token: string,
   instrumentId: string,
+  party?: string,
 ) {
-  const response = await request<unknown>(`/holdings/instrument/${instrumentId}`, {
+  const response = await request<unknown>(withQuery(`/holdings/instrument/${instrumentId}`, { party }), {
     method: 'GET',
     token,
   });
   return normalizeEvents(response);
 }
 
-export async function getHoldingByCid(token: string, holdingCid: string) {
-  const response = await request<unknown>(`/holdings/cid/${holdingCid}`, {
+export async function getHoldingByCid(token: string, holdingCid: string, party?: string) {
+  const response = await request<unknown>(withQuery(`/holdings/cid/${holdingCid}`, { party }), {
     method: 'GET',
     token,
   });
   return normalizeEvents(response);
 }
 
-export async function getRedemptionRecords(token: string) {
-  const response = await request<unknown>('/redemptions', {
+export async function getRedemptionRecords(token: string, party?: string) {
+  const response = await request<unknown>(withQuery('/redemptions', { party }), {
     method: 'GET',
     token,
   });
@@ -522,8 +535,9 @@ export async function getRedemptionRecords(token: string) {
 export async function getRedemptionRecordsByInstrument(
   token: string,
   instrumentId: string,
+  party?: string,
 ) {
-  const response = await request<unknown>(`/redemptions/instrument/${instrumentId}`, {
+  const response = await request<unknown>(withQuery(`/redemptions/instrument/${instrumentId}`, { party }), {
     method: 'GET',
     token,
   });

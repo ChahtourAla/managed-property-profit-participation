@@ -31,6 +31,7 @@ import {
   toNumber,
   toStringValue,
 } from '@/lib/platform-api';
+import { localDamlParties } from '@/lib/role-config';
 import { PageHeader } from '@/components/dashboard/page-header';
 import { ChartCard } from '@/components/dashboard/chart-card';
 import { RevenueChart } from '@/components/charts/revenue-chart';
@@ -78,6 +79,18 @@ const steps = [
     status: 'Closed',
     description: 'The contract closes and tokens are redeemed or burned.',
   },
+];
+
+const adminReaderParties = [
+  { label: 'Easycoin', value: localDamlParties.easycoin },
+  { label: 'Owner', value: localDamlParties.owner },
+  { label: 'Investor 1', value: localDamlParties.investor1 },
+  { label: 'Investor 2', value: localDamlParties.investor2 },
+  { label: 'Investor 3', value: localDamlParties.investor3 },
+  { label: 'Investor 4', value: localDamlParties.investor4 },
+  { label: 'Auditor', value: localDamlParties.auditor },
+  { label: 'Payment verifier', value: localDamlParties.paymentVerifier },
+  { label: 'Legal admin', value: localDamlParties.legalAdmin },
 ];
 
 type ReportRecord = {
@@ -1029,6 +1042,192 @@ function PaymentVerifierReportsWorkspace({ token }: { token: string }) {
   );
 }
 
+function AdminReportsWorkspace({ token }: { token: string }) {
+  const [readerParty, setReaderParty] = React.useState<string>(localDamlParties.easycoin);
+  const [instrumentId, setInstrumentId] = React.useState('INSTR-MPC-001');
+  const [reports, setReports] = React.useState<InvestorReportSummary[]>([]);
+  const [acceptedReports, setAcceptedReports] = React.useState<InvestorReportSummary[]>([]);
+  const [instrumentReports, setInstrumentReports] = React.useState<InvestorReportSummary[]>([]);
+  const [settlements, setSettlements] = React.useState<InvestorLedgerSummary[]>([]);
+  const [rewards, setRewards] = React.useState<InvestorLedgerSummary[]>([]);
+  const [paymentRewards, setPaymentRewards] = React.useState<InvestorLedgerSummary[]>([]);
+  const [rewardPayments, setRewardPayments] = React.useState<InvestorLedgerSummary[]>([]);
+  const [closedContracts, setClosedContracts] = React.useState<InvestorLedgerSummary[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+
+  const mapReport = React.useCallback((event: { contractId: string; createArguments?: Record<string, unknown> }) => {
+    const args = getDamlCreateArguments<{
+      instrumentId?: unknown;
+      periodLabel?: unknown;
+      reportHash?: unknown;
+    }>({ contractId: String(event.contractId), createArguments: event.createArguments });
+    return {
+      contractId: String(event.contractId),
+      instrumentId: toStringValue(args.instrumentId, ''),
+      periodLabel: toStringValue(args.periodLabel, ''),
+      reportHash: toStringValue(args.reportHash, ''),
+    };
+  }, []);
+
+  const mapLedger = React.useCallback((event: { contractId: string; createArguments?: Record<string, unknown> }) => {
+    const args = getDamlCreateArguments<{
+      instrumentId?: unknown;
+      investorRewardPool?: unknown;
+      rewardAmount?: unknown;
+      status?: unknown;
+    }>({ contractId: String(event.contractId), createArguments: event.createArguments });
+    return {
+      contractId: String(event.contractId),
+      instrumentId: toStringValue(args.instrumentId, ''),
+      amount: toNumber(args.investorRewardPool ?? args.rewardAmount),
+      status: toStringValue(args.status, 'Visible'),
+    };
+  }, []);
+
+  const loadData = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const [
+        reportResponse,
+        acceptedResponse,
+        byInstrumentResponse,
+        settlementResponse,
+        rewardResponse,
+        paymentRewardResponse,
+        rewardPaymentResponse,
+        closedResponse,
+      ] = await Promise.all([
+        getReports(token, readerParty),
+        getAcceptedReports(token, readerParty),
+        instrumentId.trim() ? getReportsByInstrument(token, instrumentId.trim(), readerParty).catch(() => []) : Promise.resolve([]),
+        getSettlements(token, readerParty),
+        getRewardRecords(token, readerParty),
+        getPaymentRewards(token, readerParty),
+        getRewardPaymentConfirmations(token, readerParty),
+        getClosedContracts(token, readerParty),
+      ]);
+
+      setReports(reportResponse.map(mapReport).filter((item) => item.instrumentId));
+      setAcceptedReports(acceptedResponse.map(mapReport).filter((item) => item.instrumentId));
+      setInstrumentReports(byInstrumentResponse.map(mapReport).filter((item) => item.instrumentId));
+      setSettlements(settlementResponse.map(mapLedger).filter((item) => item.instrumentId));
+      setRewards(rewardResponse.map(mapLedger).filter((item) => item.instrumentId));
+      setPaymentRewards(paymentRewardResponse.map(mapLedger).filter((item) => item.instrumentId));
+      setRewardPayments(rewardPaymentResponse.map(mapLedger).filter((item) => item.instrumentId));
+      setClosedContracts(closedResponse.map(mapLedger).filter((item) => item.instrumentId));
+    } finally {
+      setLoading(false);
+    }
+  }, [instrumentId, mapLedger, mapReport, readerParty, token]);
+
+  React.useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      await loadData();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const renderReports = (items: InvestorReportSummary[], empty: string) =>
+    items.length === 0 ? (
+      <div className="rounded-xl border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">{empty}</div>
+    ) : (
+      items.map((item) => (
+        <div key={item.contractId} className="rounded-xl border border-border/60 bg-background/60 p-4">
+          <p className="font-medium">{item.instrumentId}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{item.periodLabel} - {item.reportHash}</p>
+        </div>
+      ))
+    );
+
+  const renderLedger = (items: InvestorLedgerSummary[], empty: string) =>
+    items.length === 0 ? (
+      <div className="rounded-xl border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">{empty}</div>
+    ) : (
+      items.map((item) => (
+        <div key={`${item.contractId}-${item.status}`} className="rounded-xl border border-border/60 bg-background/60 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <p className="font-medium">{item.instrumentId}</p>
+            <Badge variant="outline">{item.status}</Badge>
+          </div>
+          {item.amount > 0 && <p className="mt-2 text-sm">{formatCurrency(item.amount)}</p>}
+        </div>
+      ))
+    );
+
+  if (loading) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <PageHeader
+        title="Admin reporting console"
+        description="Read Admin-authorized reporting, settlement, reward, and payment records by selected Daml party."
+      >
+        <Button variant="outline" size="sm" className="gap-2" onClick={refresh} disabled={refreshing}>
+          {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          Refresh
+        </Button>
+      </PageHeader>
+
+      <Card className="border-border/70">
+        <CardHeader>
+          <CardTitle className="text-base font-semibold">Admin reader controls</CardTitle>
+          <CardDescription>Use a real Daml party for ledger reads. Instrument lookup uses `/reports/instrument/:instrumentId`.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 lg:grid-cols-[1fr_0.7fr]">
+          <Select value={readerParty} onValueChange={setReaderParty}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {adminReaderParties.map((party) => (
+                <SelectItem key={party.value} value={party.value}>{party.label} - {party.value}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Input value={instrumentId} onChange={(event) => setInstrumentId(event.target.value)} placeholder="INSTR-MPC-001" />
+        </CardContent>
+      </Card>
+
+      <div className="mt-6 grid gap-4 sm:grid-cols-4">
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Reports</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{reports.length}</span></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Accepted</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{acceptedReports.length}</span></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Settlements</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{settlements.length}</span></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Payments</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{paymentRewards.length + rewardPayments.length}</span></CardContent></Card>
+      </div>
+
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+        <Card className="border-border/70">
+          <CardHeader><CardTitle className="text-base font-semibold">Reports</CardTitle></CardHeader>
+          <CardContent className="space-y-3">{renderReports([...reports, ...acceptedReports], 'No report visible for this party.')}</CardContent>
+        </Card>
+        <Card className="border-border/70">
+          <CardHeader><CardTitle className="text-base font-semibold">Reports by instrument</CardTitle></CardHeader>
+          <CardContent className="space-y-3">{renderReports(instrumentReports, 'No report visible for this instrument and party.')}</CardContent>
+        </Card>
+        <Card className="border-border/70">
+          <CardHeader><CardTitle className="text-base font-semibold">Settlement and closure</CardTitle></CardHeader>
+          <CardContent className="space-y-3">{renderLedger([...settlements, ...closedContracts], 'No settlement record visible for this party.')}</CardContent>
+        </Card>
+        <Card className="border-border/70">
+          <CardHeader><CardTitle className="text-base font-semibold">Rewards and payments</CardTitle></CardHeader>
+          <CardContent className="space-y-3">{renderLedger([...rewards, ...paymentRewards, ...rewardPayments], 'No reward or payment record visible for this party.')}</CardContent>
+        </Card>
+      </div>
+    </>
+  );
+}
+
 export default function ReportsPage() {
   const { session } = useSession();
 
@@ -1050,6 +1249,10 @@ export default function ReportsPage() {
 
   if (session.role === 'PAYMENT_VERIFIER') {
     return <PaymentVerifierReportsWorkspace token={session.accessToken} />;
+  }
+
+  if (session.role === 'ADMIN') {
+    return <AdminReportsWorkspace token={session.accessToken} />;
   }
 
   return (

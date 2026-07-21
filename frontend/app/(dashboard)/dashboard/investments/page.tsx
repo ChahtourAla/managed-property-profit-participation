@@ -1967,6 +1967,191 @@ function PaymentVerifierInvestmentsWorkspace({ token }: { token: string }) {
   );
 }
 
+const adminReaderParties = [
+  { label: 'Easycoin', value: localDamlParties.easycoin },
+  { label: 'Owner', value: localDamlParties.owner },
+  { label: 'Investor 1', value: localDamlParties.investor1 },
+  { label: 'Investor 2', value: localDamlParties.investor2 },
+  { label: 'Investor 3', value: localDamlParties.investor3 },
+  { label: 'Investor 4', value: localDamlParties.investor4 },
+  { label: 'Auditor', value: localDamlParties.auditor },
+  { label: 'Payment verifier', value: localDamlParties.paymentVerifier },
+  { label: 'Legal admin', value: localDamlParties.legalAdmin },
+];
+
+function AdminInvestmentsWorkspace({ token }: { token: string }) {
+  const [readerParty, setReaderParty] = React.useState<string>(localDamlParties.easycoin);
+  const [subscriptions, setSubscriptions] = React.useState<AuditorLedgerItem[]>([]);
+  const [fundingConfirmations, setFundingConfirmations] = React.useState<AuditorLedgerItem[]>([]);
+  const [holdings, setHoldings] = React.useState<AuditorLedgerItem[]>([]);
+  const [holderHoldings, setHolderHoldings] = React.useState<AuditorLedgerItem[]>([]);
+  const [paymentRewards, setPaymentRewards] = React.useState<AuditorLedgerItem[]>([]);
+  const [rewardConfirmations, setRewardConfirmations] = React.useState<AuditorLedgerItem[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+
+  const mapLedgerItem = React.useCallback((event: { contractId: string; createArguments?: Record<string, unknown> }) => {
+    const args = getDamlCreateArguments<{
+      instrumentId?: unknown;
+      instrumentIdText?: unknown;
+      investor?: unknown;
+      holder?: unknown;
+      recipient?: unknown;
+      upfrontAmount?: unknown;
+      requestedUnits?: unknown;
+      amount?: unknown;
+      rewardAmount?: unknown;
+      paymentReference?: unknown;
+      confirmedPaymentReference?: unknown;
+      rewardPaymentReference?: unknown;
+      status?: unknown;
+    }>({ contractId: String(event.contractId), createArguments: event.createArguments });
+
+    return {
+      contractId: String(event.contractId),
+      instrumentId: toStringValue(args.instrumentId ?? args.instrumentIdText, ''),
+      label: toStringValue(
+        args.confirmedPaymentReference ??
+          args.rewardPaymentReference ??
+          args.paymentReference ??
+          args.holder ??
+          args.investor ??
+          args.recipient,
+        'Ledger record',
+      ),
+      amount: toNumber(args.upfrontAmount ?? args.requestedUnits ?? args.amount ?? args.rewardAmount),
+      status: toStringValue(args.status, 'Visible'),
+    };
+  }, []);
+
+  const loadData = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const [subscriptionResponse, fundingResponse, holdingResponse, rewardResponse, rewardConfirmationResponse] =
+        await Promise.all([
+          getSubscriptions(token, readerParty),
+          getSubscriptionFundingConfirmations(token, readerParty),
+          getHoldings(token, readerParty),
+          getPaymentRewards(token, readerParty),
+          getRewardPaymentConfirmations(token, readerParty),
+        ]);
+
+      const normalizedHoldings = holdingResponse.map(mapLedgerItem).filter((item) => item.instrumentId);
+      const firstHolding = normalizedHoldings[0];
+      const byHolder = firstHolding
+        ? await getHoldingsByHolder(token, firstHolding.label, readerParty).catch(() => [])
+        : [];
+
+      setSubscriptions(subscriptionResponse.map(mapLedgerItem).filter((item) => item.instrumentId));
+      setFundingConfirmations(fundingResponse.map(mapLedgerItem).filter((item) => item.instrumentId));
+      setHoldings(normalizedHoldings);
+      setHolderHoldings(byHolder.map(mapLedgerItem).filter((item) => item.instrumentId));
+      setPaymentRewards(rewardResponse.map(mapLedgerItem).filter((item) => item.instrumentId));
+      setRewardConfirmations(rewardConfirmationResponse.map(mapLedgerItem).filter((item) => item.instrumentId));
+    } finally {
+      setLoading(false);
+    }
+  }, [mapLedgerItem, readerParty, token]);
+
+  React.useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      await loadData();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const renderItems = (items: AuditorLedgerItem[], empty: string) =>
+    items.length === 0 ? (
+      <div className="rounded-xl border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">{empty}</div>
+    ) : (
+      items.map((item) => (
+        <div key={`${item.contractId}-${item.status}`} className="rounded-xl border border-border/60 bg-background/60 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="truncate font-medium">{item.instrumentId}</p>
+              <p className="truncate text-sm text-muted-foreground">{item.label}</p>
+            </div>
+            <StatusBadge status={item.status} />
+          </div>
+          {item.amount !== undefined && item.amount > 0 && <p className="mt-3 text-sm font-medium">{item.amount}</p>}
+        </div>
+      ))
+    );
+
+  if (loading) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <PageHeader
+        title="Admin ledger access"
+        description="Read Admin-authorized subscriptions, funding confirmations, holdings, and payment records by selected Daml party."
+      >
+        <Button variant="outline" size="sm" className="gap-2" onClick={refresh} disabled={refreshing}>
+          {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          Refresh
+        </Button>
+      </PageHeader>
+
+      <Card className="border-border/70">
+        <CardHeader>
+          <CardTitle className="text-base font-semibold">Reader party</CardTitle>
+          <CardDescription>Admin uses backend `?party=`/`?reader=` support to inspect another ledger view.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Select value={readerParty} onValueChange={setReaderParty}>
+            <SelectTrigger className="max-w-xl"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {adminReaderParties.map((party) => (
+                <SelectItem key={party.value} value={party.value}>{party.label} - {party.value}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </CardContent>
+      </Card>
+
+      <div className="mt-6 grid gap-4 sm:grid-cols-4">
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Subscriptions</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{subscriptions.length}</span></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Funded</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{fundingConfirmations.length}</span></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Holdings</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{holdings.length}</span></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Payments</CardTitle></CardHeader><CardContent><span className="text-2xl font-semibold">{paymentRewards.length + rewardConfirmations.length}</span></CardContent></Card>
+      </div>
+
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+        <Card className="border-border/70">
+          <CardHeader><CardTitle className="text-base font-semibold">Subscriptions and funding</CardTitle></CardHeader>
+          <CardContent className="space-y-3">{renderItems([...subscriptions, ...fundingConfirmations], 'No subscription or funding record visible for this party.')}</CardContent>
+        </Card>
+        <Card className="border-border/70">
+          <CardHeader><CardTitle className="text-base font-semibold">Holdings</CardTitle><CardDescription>Includes holder lookup for the first visible holding.</CardDescription></CardHeader>
+          <CardContent className="space-y-3">
+            {renderItems(holdings, 'No holding visible for this party.')}
+            <div className="rounded-xl border border-border/60 bg-muted/30 p-4">
+              <p className="text-xs uppercase tracking-wider text-muted-foreground">By holder lookup</p>
+              <p className="mt-2 text-lg font-semibold">{holderHoldings.length}</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="border-border/70 lg:col-span-2">
+          <CardHeader><CardTitle className="text-base font-semibold">Reward and payment records</CardTitle></CardHeader>
+          <CardContent className="grid gap-3 md:grid-cols-2">{renderItems([...paymentRewards, ...rewardConfirmations], 'No payment record visible for this party.')}</CardContent>
+        </Card>
+      </div>
+    </>
+  );
+}
+
 export default function InvestmentsPage() {
   const { session } = useSession();
   const [search, setSearch] = React.useState('');
@@ -1996,6 +2181,10 @@ export default function InvestmentsPage() {
 
   if (session.role === 'PAYMENT_VERIFIER') {
     return <PaymentVerifierInvestmentsWorkspace token={session.accessToken} />;
+  }
+
+  if (session.role === 'ADMIN') {
+    return <AdminInvestmentsWorkspace token={session.accessToken} />;
   }
 
   const filtered = React.useMemo(() => {
