@@ -292,7 +292,7 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
             <CardTitle className="text-sm font-medium text-muted-foreground">Approved investors</CardTitle>
           </CardHeader>
           <CardContent>
-            <span className="text-2xl font-semibold tracking-tight">{approvedInvestors.length}</span>
+            <span className="text-2xl font-semibold tracking-tight">{approvedInvestorOptions.length}</span>
           </CardContent>
         </Card>
         <Card className="border-border/70">
@@ -323,19 +323,33 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
         <Card className="border-border/70">
           <CardHeader className="space-y-2 border-b border-border/60">
             <CardTitle className="text-lg">Approve investor</CardTitle>
-            <CardDescription>Use a Daml investor party ID and a business approval reference.</CardDescription>
+            <CardDescription>Select an investor party and provide a business approval reference.</CardDescription>
           </CardHeader>
           <form onSubmit={handleApproveInvestor}>
             <CardContent className="space-y-4 pt-6">
               <div className="space-y-2">
                 <Label htmlFor="investor-party">Investor party</Label>
-                <Input
-                  id="investor-party"
+                <Select
                   value={approvalInvestor}
-                  onChange={(e) => setApprovalInvestor(e.target.value)}
-                  placeholder={demoUsers.INVESTOR.partyId}
-                />
-                <p className="text-xs text-muted-foreground">Example: {demoUsers.INVESTOR.partyId}</p>
+                  onValueChange={setApprovalInvestor}
+                >
+                  <SelectTrigger id="investor-party">
+                    <SelectValue placeholder="Select investor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sampleInvestors.map((item) => (
+                      <SelectItem
+                        key={item.partyId}
+                        value={item.partyId}
+                      >
+                        {item.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Party ID: {approvalInvestor}
+                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="approval-reference">Approval reference</Label>
@@ -345,25 +359,14 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
                   onChange={(e) => setApprovalReference(e.target.value)}
                 />
               </div>
-              <Button type="submit" className="w-full gap-2" disabled={saving}>
+              <Button
+                type="submit"
+                className="w-full gap-2"
+                disabled={saving}
+              >
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
                 Approve investor
               </Button>
-              <div className="space-y-2">
-                <p className="text-sm font-medium">Suggested parties</p>
-                <div className="flex flex-wrap gap-2">
-                  {sampleInvestors.map((item) => (
-                    <button
-                      key={item.partyId}
-                      type="button"
-                      onClick={() => setApprovalInvestor(item.partyId)}
-                      className="rounded-full border px-3 py-1 text-xs font-medium transition-colors hover:bg-accent"
-                    >
-                      {item.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
             </CardContent>
           </form>
         </Card>
@@ -497,19 +500,25 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
             <CardDescription>Active approval contracts returned by the backend.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {approvedInvestors.length === 0 ? (
+            {approvedInvestorOptions.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-sm text-muted-foreground">
                 No approved investor yet.
               </div>
             ) : (
-              approvedInvestors.map((item) => (
-                <div key={item.contractId} className="rounded-xl border border-border/60 bg-background/60 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="font-medium">{item.investor}</p>
-                      <p className="text-sm text-muted-foreground">{item.approvalReference}</p>
+              approvedInvestorOptions.map((item) => (
+                <div key={item.investor} className="rounded-xl border border-border/60 bg-background/60 p-4">
+                  <div className="flex min-w-0 items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="break-all font-medium" title={item.investor}>{item.investor}</p>
+                      {item.approvalReferences.map((reference) => (
+                        <p key={reference} className="break-words text-sm text-muted-foreground" title={reference}>
+                          {reference}
+                        </p>
+                      ))}
                     </div>
-                    <StatusBadge status="Approved" />
+                    <div className="shrink-0">
+                      <StatusBadge status="Approved" />
+                    </div>
                   </div>
                 </div>
               ))
@@ -530,12 +539,14 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
             ) : (
               instruments.map((item) => (
                 <div key={item.contractId} className="rounded-xl border border-border/60 bg-background/60 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="font-medium">{item.instrumentId}</p>
-                      <p className="text-sm text-muted-foreground">{item.contractId}</p>
+                  <div className="flex min-w-0 items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="break-all font-medium" title={item.instrumentId}>{item.instrumentId}</p>
+                      <p className="break-all text-sm text-muted-foreground" title={item.contractId}>{item.contractId}</p>
                     </div>
-                    <StatusBadge status="Token instrument created" />
+                    <div className="shrink-0">
+                      <StatusBadge status="Token instrument created" />
+                    </div>
                   </div>
                   <div className="mt-3 grid gap-2 sm:grid-cols-2">
                     <div>
