@@ -1,6 +1,6 @@
 'use client';
 
-import type { ElementType } from 'react';
+import * as React from 'react';
 import Link from 'next/link';
 import {
   ArrowRight,
@@ -15,18 +15,12 @@ import {
   Wallet,
 } from 'lucide-react';
 
-import { stats } from '@/lib/mock-stats';
-import { transactions } from '@/lib/mock-transactions';
-import { properties } from '@/lib/mock-properties';
-import { investments } from '@/lib/mock-investments';
 import { formatCurrency, formatDate } from '@/lib/format';
-import { roleProfiles } from '@/lib/role-config';
+import { getDamlCreateArguments, getInstruments, getOwnerDrafts, getApprovedInvestors, getValidatedContracts, getSubscriptions, getSubscriptionFundingConfirmations, getHoldings, getReports, getAcceptedReports, getSettlements, getRewardRecords, getRewardPaymentConfirmations, getClosedContracts, toNumber, toStringValue } from '@/lib/platform-api';
+import { roleProfiles, type AppRole } from '@/lib/role-config';
 import { useSession } from '@/lib/session';
 import { PageHeader } from '@/components/dashboard/page-header';
 import { StatCard } from '@/components/dashboard/stat-card';
-import { ChartCard } from '@/components/dashboard/chart-card';
-import { RevenueChart } from '@/components/charts/revenue-chart';
-import { PortfolioChart } from '@/components/charts/portfolio-chart';
 import { StatusBadge } from '@/components/dashboard/status-badge';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -38,54 +32,56 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 
-const contract = properties[0];
-const recentEvents = transactions.slice(0, 5);
-const investorRows = investments.filter((item) => item.role === 'Investor');
-
-const roleHighlights: Record<
-  string,
-  {
-    label: string;
-    value: string;
-    icon: ElementType;
-  }[]
-> = {
-  OWNER: [
-    { label: 'Upfront liquidity', value: formatCurrency(34000), icon: Wallet },
-    { label: 'Retained share', value: formatCurrency(38400), icon: BadgeCheck },
-    { label: 'Contract status', value: contract.status, icon: Building2 },
-  ],
-  EASYCOIN: [
-    { label: 'Validated contract', value: contract.id, icon: Building2 },
-    { label: 'Open tasks', value: 'Draft, instrument, settlement', icon: FileClock },
-    { label: 'Investor pool', value: `${investorRows.length} approved`, icon: Users },
-  ],
-  INVESTOR: [
-    { label: 'Subscribed units', value: '700', icon: Coins },
-    { label: 'Funding status', value: 'Funded', icon: Wallet },
-    { label: 'Expected reward', value: formatCurrency(38400), icon: BadgeCheck },
-  ],
-  AUDITOR: [
-    { label: 'Reports pending', value: '1', icon: ScrollText },
-    { label: 'Final state', value: 'Reconciled', icon: BadgeCheck },
-    { label: 'Closure state', value: 'Ready', icon: ShieldCheck },
-  ],
-  PAYMENT_VERIFIER: [
-    { label: 'Funding checks', value: '1 pending', icon: Wallet },
-    { label: 'Reward checks', value: '1 pending', icon: BadgeCheck },
-    { label: 'Audit trace', value: 'Visible', icon: ScrollText },
-  ],
-  LEGAL_ADMIN: [
-    { label: 'Owner confirmation', value: 'Required', icon: Landmark },
-    { label: 'Investor approvals', value: 'Approved', icon: Users },
-    { label: 'Compliance view', value: 'Read only', icon: ShieldCheck },
-  ],
-  ADMIN: [
-    { label: 'Role access', value: 'All interfaces', icon: ShieldCheck },
-    { label: 'Workflow health', value: 'Online', icon: BadgeCheck },
-    { label: 'Demo state', value: 'Active', icon: FileClock },
-  ],
+type DashboardEvent = {
+  contractId: string;
+  createArguments?: Record<string, unknown>;
+  createdAt?: string;
+  templateId?: string;
 };
+
+type DashboardData = Record<string, DashboardEvent[]>;
+
+const emptyDashboardData: DashboardData = {
+  drafts: [], validated: [], approved: [], instruments: [], subscriptions: [],
+  funding: [], holdings: [], reports: [], acceptedReports: [], settlements: [],
+  rewards: [], rewardConfirmations: [], closed: [],
+};
+
+const safeLoad = async (load: Promise<DashboardEvent[]>) => {
+  try { return await load; } catch { return []; }
+};
+
+const eventArgs = (event: DashboardEvent) => getDamlCreateArguments<Record<string, unknown>>(event as never);
+
+async function loadDashboardData(token: string, role: AppRole): Promise<DashboardData> {
+  const data = { ...emptyDashboardData };
+  const load = (key: string, request: Promise<DashboardEvent[]>) => request.then((value) => { data[key] = value; });
+  const common = [
+    load('instruments', safeLoad(getInstruments(token))),
+    load('subscriptions', safeLoad(getSubscriptions(token))),
+    load('funding', safeLoad(getSubscriptionFundingConfirmations(token))),
+    load('holdings', safeLoad(getHoldings(token))),
+    load('reports', safeLoad(getReports(token))),
+    load('acceptedReports', safeLoad(getAcceptedReports(token))),
+    load('settlements', safeLoad(getSettlements(token))),
+    load('rewards', safeLoad(getRewardRecords(token))),
+    load('rewardConfirmations', safeLoad(getRewardPaymentConfirmations(token))),
+    load('closed', safeLoad(getClosedContracts(token))),
+  ];
+
+  if (role === 'EASYCOIN' || role === 'OWNER' || role === 'AUDITOR' || role === 'LEGAL_ADMIN') {
+    await Promise.all([
+      ...common,
+      load('drafts', safeLoad(getOwnerDrafts(token))),
+      load('validated', safeLoad(getValidatedContracts(token))),
+      load('approved', safeLoad(getApprovedInvestors(token))),
+    ]);
+  } else {
+    await Promise.all(common);
+  }
+
+  return data;
+}
 
 const roleActionBlocks = {
   OWNER: [
@@ -191,13 +187,52 @@ const roleActionBlocks = {
 export default function DashboardPage() {
   const { session } = useSession();
   const profile = roleProfiles[session.role];
-  const highlights = roleHighlights[session.role];
   const actions = roleActionBlocks[session.role];
+  const [data, setData] = React.useState<DashboardData>(emptyDashboardData);
+  const [loading, setLoading] = React.useState(true);
 
-  const timeline =
-    session.role === 'INVESTOR'
-      ? investorRows.slice(1, 4)
-      : recentEvents;
+  React.useEffect(() => {
+    let active = true;
+    setLoading(true);
+    void loadDashboardData(session.accessToken, session.role).then((nextData) => {
+      if (active) {
+        setData(nextData);
+        setLoading(false);
+      }
+    });
+    return () => { active = false; };
+  }, [session.accessToken, session.role]);
+
+  const uniqueInvestors = new Set(
+    data.approved.map((event) => toStringValue(eventArgs(event).investor)).filter(Boolean),
+  ).size;
+  const contractEvent = data.validated[0] ?? data.drafts[0] ?? data.instruments[0];
+  const contractArgs = contractEvent ? eventArgs(contractEvent) : {};
+  const contractData = (contractArgs.contractData as Record<string, unknown> | undefined) ?? contractArgs;
+  const contractId = toStringValue(contractData.contractId, contractEvent?.contractId ?? 'No contract yet');
+  const contractName = toStringValue(contractData.propertyName, 'Managed property');
+  const contractAddress = toStringValue(contractData.propertyAddress ?? contractData.address, 'Address not available');
+  const contractStatus = data.closed.length > 0 ? 'Closed' : data.settlements.length > 0 ? 'Reconciled' : data.instruments.length > 0 ? 'Token instrument created' : data.validated.length > 0 ? 'Validated' : data.drafts.length > 0 ? 'Draft' : 'No active contract';
+  const upfrontTotal = data.subscriptions.reduce((sum, event) => sum + toNumber(eventArgs(event).upfrontAmount), 0);
+  const rewardTotal = data.rewards.reduce((sum, event) => sum + toNumber(eventArgs(event).amount ?? eventArgs(event).rewardAmount), 0);
+  const isInvestor = session.role === 'INVESTOR';
+  const activeContractCount = isInvestor ? data.subscriptions.length : data.validated.length + data.drafts.length;
+  const participantCount = isInvestor ? data.subscriptions.length : uniqueInvestors;
+  const highlights = [
+    { label: isInvestor ? 'My subscriptions' : 'Active contracts', value: String(activeContractCount), icon: Building2 },
+    { label: 'Tokenized instruments', value: String(data.instruments.length), icon: Coins },
+    { label: isInvestor ? 'My participation' : 'Approved investors', value: String(participantCount), icon: Users },
+  ];
+  const timeline = [...Object.values(data).flat()]
+    .filter((event, index, events) => event.contractId && events.findIndex((candidate) => candidate.contractId === event.contractId) === index)
+    .sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime())
+    .slice(0, 5);
+  const dynamicStats = [
+    { id: 'contracts', label: isInvestor ? 'Available instruments' : 'Managed contracts', value: String(isInvestor ? data.instruments.length : activeContractCount), delta: 0, trend: 'up' as const, icon: 'building' as const },
+    { id: 'investors', label: isInvestor ? 'My subscriptions' : 'Approved investors', value: String(participantCount), delta: 0, trend: 'up' as const, icon: 'users' as const },
+    { id: 'funding', label: isInvestor ? 'My upfront funding' : 'Upfront funding', value: formatCurrency(upfrontTotal), delta: 0, trend: 'up' as const, icon: 'dollar' as const },
+    { id: 'rewards', label: isInvestor ? 'Expected rewards' : 'Recorded rewards', value: formatCurrency(rewardTotal), delta: 0, trend: 'up' as const, icon: 'trending' as const },
+  ];
 
   return (
     <>
@@ -217,13 +252,13 @@ export default function DashboardPage() {
       </PageHeader>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {stats.map((stat) => (
+        {dynamicStats.map((stat) => (
           <StatCard key={stat.id} {...stat} />
         ))}
       </div>
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-        <Card className="border-border/70">
+      <div className="mt-6 grid items-stretch gap-4 lg:grid-cols-2">
+        <Card className="h-full w-full border-border/70">
           <CardHeader className="space-y-4 border-b border-border/60">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="secondary" className="gap-1.5 rounded-full px-3 py-1">
@@ -236,12 +271,12 @@ export default function DashboardPage() {
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <CardTitle className="text-xl">{contract.name}</CardTitle>
+                <CardTitle className="text-xl">{contractName}</CardTitle>
                 <CardDescription>
-                  {contract.address} - {contract.id}
+                  {contractAddress} - {contractId}
                 </CardDescription>
               </div>
-              <StatusBadge status={contract.status} />
+              <StatusBadge status={contractStatus} />
             </div>
           </CardHeader>
           <CardContent className="grid gap-4 pt-6 sm:grid-cols-3">
@@ -251,23 +286,23 @@ export default function DashboardPage() {
                   <item.icon className="h-4 w-4" />
                   {item.label}
                 </div>
-                <p className="mt-2 text-lg font-semibold tracking-tight">{item.value}</p>
+                <p className="mt-2 text-lg font-semibold tracking-tight">{loading ? 'Loading...' : item.value}</p>
               </div>
             ))}
           </CardContent>
         </Card>
 
-        <Card className="border-border/70">
+        <Card className="flex h-full w-full flex-col border-border/70">
           <CardHeader>
             <CardTitle className="text-base font-semibold">Role interface</CardTitle>
             <CardDescription>{profile.tagline}</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="flex flex-1 flex-col justify-center gap-3">
             {actions.map((action) => (
               <Link
                 key={action.title}
                 href={action.href}
-                className="flex items-start gap-3 rounded-xl border border-border/60 p-3 transition-colors hover:bg-accent/50"
+                className="flex min-h-[72px] items-center gap-3 rounded-xl border border-border/60 p-3 transition-colors hover:bg-accent/50"
               >
                 <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
                   <action.icon className="h-4 w-4 text-muted-foreground" />
@@ -282,25 +317,7 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {session.role !== 'ADMIN' && session.role !== 'INVESTOR' && (
-        <div className="mt-6 grid gap-4 lg:grid-cols-3">
-          <ChartCard
-            className="lg:col-span-2"
-            title="Financial period tracking"
-            description="Rental income and expense tracking for the managed property POC."
-          >
-            <RevenueChart />
-          </ChartCard>
-          <ChartCard
-            title="Profit allocation"
-            description="Owner-side distributable profit split at the end of the period."
-          >
-            <PortfolioChart />
-          </ChartCard>
-        </div>
-      )}
-
-      <div className="mt-6 grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
         <Card className="border-border/70">
           <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <div>
@@ -321,9 +338,16 @@ export default function DashboardPage() {
             </Button>
           </CardHeader>
           <CardContent className="space-y-1">
-            {timeline.map((item) => (
+            {timeline.length === 0 ? (
+              <p className="px-2 py-6 text-sm text-muted-foreground">No backend events available.</p>
+            ) : timeline.map((item) => {
+              const args = eventArgs(item);
+              const eventLabel = toStringValue(args.instrumentId ?? args.contractId ?? args.investor, 'Backend event');
+              const eventStatus = toStringValue(args.status, item.templateId?.split(':').pop() ?? 'Recorded');
+              const eventAmount = toNumber(args.amount ?? args.upfrontAmount ?? args.rewardAmount);
+              return (
               <div
-                key={item.id}
+                key={item.contractId}
                 className="flex items-center justify-between gap-4 rounded-lg px-2 py-2.5 transition-colors hover:bg-accent/50"
               >
                 <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -335,22 +359,19 @@ export default function DashboardPage() {
                     )}
                   </div>
                   <div className="flex min-w-0 flex-col">
-                    <span className="truncate text-sm font-medium">
-                      {'description' in item ? item.description : item.holder}
-                    </span>
+                    <span className="truncate text-sm font-medium">{eventLabel}</span>
                     <span className="text-xs text-muted-foreground">
-                      {formatDate('date' in item ? item.date : item.startDate)}
+                      {item.createdAt ? formatDate(item.createdAt) : 'Date unavailable'}
                     </span>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <StatusBadge status={'status' in item ? item.status : 'Funded'} />
-                  <span className="text-sm text-muted-foreground">
-                    {'amount' in item ? formatCurrency(item.amount) : formatCurrency(item.expectedReward)}
-                  </span>
+                  <StatusBadge status={eventStatus} />
+                  {eventAmount > 0 && <span className="text-sm text-muted-foreground">{formatCurrency(eventAmount)}</span>}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </CardContent>
         </Card>
 
@@ -362,15 +383,15 @@ export default function DashboardPage() {
           <CardContent className="space-y-3">
             <div className="rounded-xl border border-border/60 bg-background/60 p-4">
               <p className="text-xs uppercase tracking-wider text-muted-foreground">Contract</p>
-              <p className="mt-2 text-sm font-medium">{contract.id}</p>
+              <p className="mt-2 break-all text-sm font-medium">{contractId}</p>
             </div>
             <div className="rounded-xl border border-border/60 bg-background/60 p-4">
               <p className="text-xs uppercase tracking-wider text-muted-foreground">Financial period</p>
-              <p className="mt-2 text-sm font-medium">2026</p>
+              <p className="mt-2 text-sm font-medium">{data.reports.length + data.settlements.length} recorded events</p>
             </div>
             <div className="rounded-xl border border-border/60 bg-background/60 p-4">
               <p className="text-xs uppercase tracking-wider text-muted-foreground">Expected investor settlement</p>
-              <p className="mt-2 text-sm font-medium">{formatCurrency(38400)}</p>
+              <p className="mt-2 text-sm font-medium">{formatCurrency(rewardTotal)}</p>
             </div>
           </CardContent>
         </Card>
