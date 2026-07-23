@@ -60,6 +60,25 @@ type ApprovedInvestorRecord = {
   approvalReference: string;
 };
 
+type ApprovedInvestorOption = {
+  investor: string;
+  approvalReferences: string[];
+};
+
+function groupApprovedInvestors(records: ApprovedInvestorRecord[]): ApprovedInvestorOption[] {
+  const grouped = new Map<string, string[]>();
+
+  records.forEach((record) => {
+    const references = grouped.get(record.investor) ?? [];
+    if (record.approvalReference && !references.includes(record.approvalReference)) {
+      references.push(record.approvalReference);
+    }
+    grouped.set(record.investor, references);
+  });
+
+  return Array.from(grouped, ([investor, approvalReferences]) => ({ investor, approvalReferences }));
+}
+
 type InstrumentRecord = {
   contractId: string;
   instrumentId: string;
@@ -245,6 +264,8 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
     }
   };
 
+  const approvedInvestorOptions = groupApprovedInvestors(approvedInvestors);
+
   if (loading) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
@@ -417,10 +438,10 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
               <div className="sm:col-span-2 space-y-3">
                 <p className="text-sm font-medium">Approved investors for the instrument</p>
                 <div className="grid gap-2 sm:grid-cols-2">
-                  {approvedInvestors.map((item) => (
+                  {approvedInvestorOptions.map((item) => (
                     <label
-                      key={item.contractId}
-                      className="flex items-start gap-3 rounded-xl border border-border/60 p-3"
+                      key={item.investor}
+                      className="flex min-w-0 items-start gap-3 rounded-xl border border-border/60 p-3"
                     >
                       <Checkbox
                         checked={selectedApprovedInvestors.includes(item.investor)}
@@ -432,9 +453,24 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
                           )
                         }
                       />
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium">{item.investor}</p>
-                        <p className="text-xs text-muted-foreground">{item.approvalReference}</p>
+                      <div className="min-w-0 flex-1">
+                        <p
+                          className="break-all text-sm font-medium leading-5"
+                          title={item.investor}
+                        >
+                          {item.investor}
+                        </p>
+                        <div className="mt-0.5 space-y-0.5">
+                          {item.approvalReferences.map((reference) => (
+                            <p
+                              key={reference}
+                              className="break-words text-xs leading-5 text-muted-foreground"
+                              title={reference}
+                            >
+                              {reference}
+                            </p>
+                          ))}
+                        </div>
                       </div>
                     </label>
                   ))}
