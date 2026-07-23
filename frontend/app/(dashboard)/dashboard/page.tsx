@@ -190,6 +190,13 @@ export default function DashboardPage() {
   const actions = roleActionBlocks[session.role];
   const [data, setData] = React.useState<DashboardData>(emptyDashboardData);
   const [loading, setLoading] = React.useState(true);
+  const [partyIdCopied, setPartyIdCopied] = React.useState(false);
+
+  const handleCopyPartyId = async () => {
+    await navigator.clipboard.writeText(session.partyId);
+    setPartyIdCopied(true);
+    window.setTimeout(() => setPartyIdCopied(false), 1600);
+  };
 
   React.useEffect(() => {
     let active = true;
@@ -264,10 +271,16 @@ export default function DashboardPage() {
               <Badge variant="secondary" className="gap-1.5 rounded-full px-3 py-1">
                 {profile.badge}
               </Badge>
-              <Badge variant="outline" className="gap-1.5 rounded-full px-3 py-1">
-                <ShieldCheck className="h-3.5 w-3.5" />
-                {session.partyId}
-              </Badge>
+              <button
+                type="button"
+                onClick={handleCopyPartyId}
+                className="inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs font-medium tracking-wider text-foreground transition-colors hover:bg-accent"
+                title="Copy full party ID"
+                aria-label="Copy full party ID"
+              >
+                <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{partyIdCopied ? 'Copied' : `${session.partyId.slice(0, 15)}...`}</span>
+              </button>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
               <div>

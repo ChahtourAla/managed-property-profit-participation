@@ -405,9 +405,9 @@ function EasycoinTransactionsWorkspace({ token }: { token: string }) {
                   <SelectValue placeholder="Select reconciliation" />
                 </SelectTrigger>
                 <SelectContent>
-                  {settlements.map((item) => (
-                    <SelectItem key={item.contractId} value={item.contractId}>
-                      {item.contractId} - {item.instrumentId}
+                    {settlements.map((item) => (
+                    <SelectItem key={item.contractId} value={item.contractId} className="max-w-full">
+                      <span className="break-all">{item.contractId} - {item.instrumentId}</span>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -450,9 +450,9 @@ function EasycoinTransactionsWorkspace({ token }: { token: string }) {
               <div className="rounded-xl border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">No reconciliation yet.</div>
             ) : (
               settlements.map((item) => (
-                <div key={item.contractId} className="rounded-xl border border-border/60 bg-background/60 p-4">
-                  <p className="font-medium">{item.instrumentId}</p>
-                  <p className="text-sm text-muted-foreground">{item.contractId}</p>
+                <div key={item.contractId} className="min-w-0 rounded-xl border border-border/60 bg-background/60 p-4">
+                  <p className="break-all font-medium" title={item.instrumentId}>{item.instrumentId}</p>
+                  <p className="break-all text-sm text-muted-foreground" title={item.contractId}>{item.contractId}</p>
                   <div className="mt-2"><StatusBadge status="Reconciled" /></div>
                 </div>
               ))
@@ -468,9 +468,9 @@ function EasycoinTransactionsWorkspace({ token }: { token: string }) {
               <div className="rounded-xl border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">No reward record yet.</div>
             ) : (
               rewards.map((item) => (
-                <div key={item.contractId} className="rounded-xl border border-border/60 bg-background/60 p-4">
-                  <p className="font-medium">{item.recipient}</p>
-                  <p className="text-sm text-muted-foreground">{item.holdingCid}</p>
+                <div key={item.contractId} className="min-w-0 rounded-xl border border-border/60 bg-background/60 p-4">
+                  <p className="break-all font-medium" title={item.recipient}>{item.recipient}</p>
+                  <p className="break-all text-sm text-muted-foreground" title={item.holdingCid}>{item.holdingCid}</p>
                 </div>
               ))
             )}
@@ -485,9 +485,9 @@ function EasycoinTransactionsWorkspace({ token }: { token: string }) {
               <div className="rounded-xl border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">No closed contract yet.</div>
             ) : (
               closedContracts.map((item) => (
-                <div key={item.contractId} className="rounded-xl border border-border/60 bg-background/60 p-4">
-                  <p className="font-medium">{item.instrumentId}</p>
-                  <p className="text-sm text-muted-foreground">{item.contractId}</p>
+                <div key={item.contractId} className="min-w-0 rounded-xl border border-border/60 bg-background/60 p-4">
+                  <p className="break-all font-medium" title={item.instrumentId}>{item.instrumentId}</p>
+                  <p className="break-all text-sm text-muted-foreground" title={item.contractId}>{item.contractId}</p>
                 </div>
               ))
             )}
