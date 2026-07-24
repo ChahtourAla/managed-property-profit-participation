@@ -6,6 +6,7 @@ import { UsersModule } from './users/users.module';
 import { ContractsModule } from './contracts/contracts.module';
 import { InvestorsModule } from './investors/investors.module';
 import { InstrumentsModule } from './instruments/instruments.module';
+import { PropertiesModule } from './properties/properties.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { HoldingsModule } from './holdings/holdings.module';
 import { ReportsModule } from './reports/reports.module';
@@ -25,6 +26,7 @@ import { AuthModule } from './auth/auth.module';
     AuthModule,
     ContractsModule,
     InvestorsModule,
+    PropertiesModule,
     InstrumentsModule,
     SubscriptionsModule,
     HoldingsModule,

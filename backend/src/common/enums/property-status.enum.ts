@@ -1,0 +1,7 @@
+export enum PropertyStatus {
+  DRAFT = 'DRAFT',
+  PENDING_REVIEW = 'PENDING_REVIEW',
+  APPROVED = 'APPROVED',
+  PUBLISHED = 'PUBLISHED',
+  ARCHIVED = 'ARCHIVED',
+}

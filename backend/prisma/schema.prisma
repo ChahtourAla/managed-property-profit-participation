@@ -9,13 +9,99 @@ datasource db {
 }
 
 model User {
+  id              String   @id @default(cuid())
+  email           String   @unique
+  passwordHash    String
+  fullName        String?
+  role            String
+  partyId         String?  @unique
+
+  approvalStatus  String   @default("PENDING")
+  isActive        Boolean  @default(false)
+
+  approvedById    String?
+  approvedAt      DateTime?
+  rejectedById    String?
+  rejectedAt      DateTime?
+  rejectionReason String?
+
+  properties      Property[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+} 
+
+model Property {
+  id                   String   @id @default(cuid())
+  propertyId           String   @unique
+
+  ownerUserId          String
+  owner                User     @relation(fields: [ownerUserId], references: [id])
+  ownerPartyId         String?
+
+  name                 String
+  description          String?
+  propertyType         String?
+  address              String?
+  city                 String?
+  country              String?
+  surfaceArea          Float?
+  rooms                Int?
+  bedrooms             Int?
+  bathrooms            Int?
+
+  expectedRentalIncome Float?
+  expectedExpenses     Float?
+  currency             String   @default("MAD")
+
+  status               String   @default("DRAFT")
+
+  images               PropertyImage[]
+  rentalHistory        RentalHistory[]
+  documents            PropertyDocument[]
+
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+model PropertyImage {
   id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String
-  fullName     String?
-  role         String
-  partyId      String?  @unique
-  isActive     Boolean  @default(true)
+  propertyDbId String
+  property     Property @relation(fields: [propertyDbId], references: [id], onDelete: Cascade)
+
+  url          String
+  caption      String?
+  isMain       Boolean  @default(false)
+  sortOrder    Int      @default(0)
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model RentalHistory {
+  id            String   @id @default(cuid())
+  propertyDbId  String
+  property      Property @relation(fields: [propertyDbId], references: [id], onDelete: Cascade)
+
+  periodLabel   String
+  rentalIncome  Float
+  expenses      Float?
+  occupancyRate Float?
+  netIncome     Float?
+  currency      String   @default("MAD")
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model PropertyDocument {
+  id           String   @id @default(cuid())
+  propertyDbId String
+  property     Property @relation(fields: [propertyDbId], references: [id], onDelete: Cascade)
+
+  name         String
+  url          String
+  documentHash String?
 
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt

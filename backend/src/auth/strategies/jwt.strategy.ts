@@ -3,8 +3,9 @@ import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 
+import { UserApprovalStatus } from '../../common/enums/user-approval-status.enum';
 import { UserRole } from '../../common/enums/user-role.enum';
-import { AuthenticatedUser } from '../../common/types/authenticated-user.type';
+import type { AuthenticatedUser } from '../../common/types/authenticated-user.type';
 import { UsersService } from '../../users/users.service';
 
 interface JwtPayload {
@@ -34,10 +35,18 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   }
 
   async validate(payload: JwtPayload): Promise<AuthenticatedUser> {
-    const user = await this.usersService.findActiveById(payload.sub);
+    const user = await this.usersService.findById(payload.sub);
 
     if (!user) {
       throw new UnauthorizedException('Invalid token user');
+    }
+
+    if (user.approvalStatus !== UserApprovalStatus.APPROVED) {
+      throw new UnauthorizedException('User account is not approved');
+    }
+
+    if (!user.isActive) {
+      throw new UnauthorizedException('User account is inactive');
     }
 
     return {
@@ -46,6 +55,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       fullName: user.fullName,
       role: user.role as UserRole,
       partyId: user.partyId,
+      approvalStatus: user.approvalStatus as UserApprovalStatus,
       isActive: user.isActive,
     };
   }
