@@ -55,7 +55,7 @@ export default function RegisterPage() {
           Create an account
         </CardTitle>
         <CardDescription>
-          Start tracking tokenized profit participation with EasyCoin
+          Start tracking tokenized profit participation with Menzel
         </CardDescription>
       </CardHeader>
       <form onSubmit={handleSubmit}>

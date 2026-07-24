@@ -26,6 +26,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Separator } from '@/components/ui/separator';
+import { BrandLogo } from '@/components/brand-logo';
 
 const trustedBy = ['Property firms', 'FinTech teams', 'Private capital', 'Asset managers', 'Operations leads'];
 
@@ -187,21 +188,14 @@ function StatCard({
 
 export default function Home() {
   return (
-    <main className="relative min-h-screen overflow-hidden bg-white text-foreground">
+    <main className="relative min-h-screen overflow-hidden bg-background text-foreground">
       <div className="pointer-events-none absolute inset-0 bg-background" />
+      <div className="landing-starfield pointer-events-none absolute -right-8 top-0 z-0 h-[56rem] w-[30rem] opacity-70" aria-hidden="true" />
 
-      <div className="relative mx-auto w-full max-w-7xl px-4 pb-12 pt-4 sm:px-6 lg:px-8">
-        <header className="sticky top-4 z-30 mb-8 rounded-[1.5rem] border border-border/70 bg-card/85 px-4 py-4 shadow-[0_18px_50px_-36px_rgba(15,23,42,0.28)]">
+      <div className="relative z-10 mx-auto w-full max-w-7xl px-4 pb-12 pt-4 sm:px-6 lg:px-8">
+        <header className="sticky top-4 z-30 mb-8 rounded-[1.5rem] border border-border/70 bg-card/95 px-5 py-4 shadow-[0_18px_50px_-36px_rgba(19,58,49,0.32)] backdrop-blur">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <Link href="/" className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/20">
-                <Landmark className="h-5 w-5" />
-              </div>
-              <div>
-                <div className="text-base font-semibold tracking-tight">Easycoin</div>
-                <div className="text-xs text-muted-foreground">FinTech for managed property profits</div>
-              </div>
-            </Link>
+            <Link href="/" aria-label="Menzel home"><BrandLogo /></Link>
 
             <nav className="flex flex-wrap items-center gap-2 text-sm font-medium text-muted-foreground">
               {['Product', 'How it works', 'Features', 'Security', 'FAQ'].map((item) => (
@@ -217,9 +211,6 @@ export default function Home() {
 
             <div className="flex flex-wrap items-center gap-2">
               <ThemeToggle />
-              <Button variant="outline" size="sm" asChild>
-                <Link href="/login">Contact sales</Link>
-              </Button>
               <Button size="sm" asChild className="gap-2">
                 <Link href="/dashboard">
                   Get started
@@ -230,53 +221,54 @@ export default function Home() {
           </div>
         </header>
 
-        <section id="product" className="relative py-8 lg:py-16">
+        <section id="product" className="landing-hero relative overflow-hidden rounded-[2rem] bg-primary px-6 py-10 text-primary-foreground shadow-[0_30px_80px_-45px_rgba(19,58,49,0.7)] sm:px-10 lg:px-14 lg:py-16">
+          <div className="pointer-events-none absolute -right-20 -top-24 h-80 w-80 rounded-full border border-[var(--brand-gold)]/20 bg-[radial-gradient(circle_at_center,rgba(196,162,78,0.18),transparent_65%)]" />
           <div className="relative grid gap-10 lg:grid-cols-[1.08fr_0.92fr] lg:items-center">
-          <div className="space-y-8">
+          <div className="landing-hero-copy space-y-8">
             <div className="flex flex-wrap gap-2">
-              <SectionLabel>Managed property profits</SectionLabel>
-              <SectionLabel>Role-based finance workflow</SectionLabel>
+              <span className="rounded-full border border-[var(--brand-gold)]/50 bg-[var(--brand-gold)]/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--brand-gold)]">Managed property profits</span>
+              <span className="rounded-full border border-primary-foreground/20 bg-primary-foreground/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-primary-foreground/80">Role-based workflow</span>
             </div>
 
             <div className="space-y-5">
-              <h1 className="max-w-3xl text-5xl font-semibold leading-[0.94] tracking-tight text-balance sm:text-6xl lg:text-[4.9rem]">
-                Premium liquidity for managed property profits.
+              <h1 className="font-serif max-w-3xl text-5xl font-semibold leading-[0.94] tracking-tight text-balance sm:text-6xl lg:text-[5.2rem]">
+                Own the income,<br />not the burden.
               </h1>
-              <p className="max-w-2xl text-lg leading-8 text-muted-foreground sm:text-xl">
-                Easycoin helps property owners unlock upfront liquidity from a managed contract
+              <p className="max-w-2xl text-lg leading-8 text-primary-foreground/75 sm:text-xl">
+                Menzel helps property owners unlock upfront liquidity from a managed contract
                 while investors participate in future rental profits through a private,
                 role-based workflow.
               </p>
             </div>
 
             <div className="flex flex-wrap gap-3">
-              <Button size="lg" asChild className="gap-2">
+              <Button size="lg" asChild className="gap-2 border-0 bg-[var(--brand-gold)] text-[#0E1F1A] hover:bg-[#E0C883]">
                 <Link href="/dashboard">
                   Start Investing
                   <ArrowRight className="h-4 w-4" />
                 </Link>
               </Button>
-              <Button variant="outline" size="lg" asChild>
+              <Button variant="outline" size="lg" asChild className="border-primary-foreground/25 bg-transparent text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground">
                 <Link href="/login">Become a Property Owner</Link>
               </Button>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-3">
-              <div className="rounded-2xl border border-border/70 bg-card/70 px-4 py-3">
-                <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                  <ShieldCheck className="h-4 w-4 text-success" />
+              <div className="rounded-2xl border border-primary-foreground/15 bg-primary-foreground/10 px-4 py-3">
+                <div className="flex items-center gap-2 text-sm font-medium text-primary-foreground">
+                  <ShieldCheck className="h-4 w-4 text-[var(--brand-gold)]" />
                   Owner retains the property
                 </div>
               </div>
-              <div className="rounded-2xl border border-border/70 bg-card/70 px-4 py-3">
-                <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                  <TrendingUp className="h-4 w-4 text-success" />
+              <div className="rounded-2xl border border-primary-foreground/15 bg-primary-foreground/10 px-4 py-3">
+                <div className="flex items-center gap-2 text-sm font-medium text-primary-foreground">
+                  <TrendingUp className="h-4 w-4 text-[var(--brand-gold)]" />
                   Investors fund future profits
                 </div>
               </div>
-              <div className="rounded-2xl border border-border/70 bg-card/70 px-4 py-3">
-                <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                  <LockKeyhole className="h-4 w-4 text-success" />
+              <div className="rounded-2xl border border-primary-foreground/15 bg-primary-foreground/10 px-4 py-3">
+                <div className="flex items-center gap-2 text-sm font-medium text-primary-foreground">
+                  <LockKeyhole className="h-4 w-4 text-[var(--brand-gold)]" />
                   Settlement stays auditable
                 </div>
               </div>
@@ -284,80 +276,37 @@ export default function Home() {
           </div>
 
           <div className="relative">
-            <Card className="relative overflow-hidden border-border/70 bg-card/85 shadow-[0_28px_90px_-40px_rgba(15,23,42,0.38)]">
-              <div className="h-1 bg-primary" />
-              <CardContent className="space-y-5 p-6 sm:p-7">
-                <div className="rounded-[1.6rem] border border-border/70 bg-background/60 p-6">
-                  <div className="flex items-center justify-between gap-4">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                        Contract overview
-                      </p>
-                      <p className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
-                        Managed property participation
-                      </p>
-                    </div>
-                    <Badge className="rounded-full bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
-                      Active
-                    </Badge>
-                  </div>
+            <div className="mx-auto w-full max-w-[25rem] rounded-[3rem] border-[14px] border-[#111212] bg-[#F6F2E9] p-2 shadow-[0_30px_80px_-30px_rgba(14,31,26,0.65)]">
+              <div className="overflow-hidden rounded-[2.15rem] bg-[#F6F2E9] px-5 pb-6 pt-6">
+                <div className="flex justify-center border-b border-[#D8D2C4] pb-5">
+                  <BrandLogo />
+                </div>
 
-                  <div className="mt-6 space-y-4">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">Upfront liquidity</span>
-                      <span className="font-semibold text-foreground">8,200 USDC</span>
-                    </div>
-                    <div className="h-2.5 overflow-hidden rounded-full bg-secondary">
-                      <div className="h-full w-[72%] rounded-full bg-primary" />
-                    </div>
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">Investor funding</span>
-                      <span className="font-medium text-foreground">72%</span>
-                    </div>
-                  </div>
+                <div className="mt-5 rounded-[1.35rem] bg-[#1B4A3F] px-5 py-6 text-[#F6F2E9] shadow-lg">
+                  <p className="text-sm font-medium tracking-wide text-[#E0C883]">Your portfolio</p>
+                  <p className="font-serif mt-2 text-[2.9rem] leading-none">42,800 <span className="text-lg text-[#E0C883]">MAD</span></p>
+                  <p className="mt-2 text-sm text-[#D8D2C4]">+ 6.2% distributable this period</p>
+                </div>
 
-                  <div className="mt-6 rounded-[1.25rem] border border-border/70 bg-card p-4">
-                    <div className="flex items-center justify-between gap-4">
-                      <div>
-                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                          Settlement
-                        </p>
-                        <p className="mt-1 text-sm font-semibold text-foreground">
-                          Final reconciliation
-                        </p>
+                <div className="mt-6">
+                  <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[#C4A24E]">Active participation</p>
+                  <div className="mt-3 space-y-3">
+                    {[{ name: 'Villa Gammarth', place: 'Tunis', amount: '18,000', progress: '72%' }, { name: 'Riad Sidi Bou', place: 'Coastal', amount: '14,500', progress: '55%' }].map((item) => (
+                      <div key={item.name} className="rounded-[1.1rem] border border-[#D8D2C4] bg-[#FBFAF6] px-4 py-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-semibold leading-tight text-[#0E1F1A]">{item.name}</p>
+                            <p className="mt-1 text-xs text-[#746F63]">{item.place} · 12-mo period</p>
+                          </div>
+                          <p className="font-semibold text-[#A9822F]">{item.amount}<br />MAD</p>
+                        </div>
+                        <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#D8D2C4]"><div className="h-full rounded-full bg-[#B08A3A]" style={{ width: item.progress }} /></div>
                       </div>
-                      <Badge variant="outline" className="border-emerald-200 text-emerald-700">
-                        2,400 USDC
-                      </Badge>
-                    </div>
-                    <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                      Profit split after the managed property period closes.
-                    </p>
-                  </div>
-
-                  <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                    <div className="rounded-2xl border border-border/70 bg-card p-3">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                        Owner
-                      </p>
-                      <p className="mt-1 text-sm font-semibold text-foreground">Keeps the property</p>
-                    </div>
-                    <div className="rounded-2xl border border-border/70 bg-card p-3">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                        Investor
-                      </p>
-                      <p className="mt-1 text-sm font-semibold text-foreground">Funds future profit</p>
-                    </div>
-                    <div className="rounded-2xl border border-border/70 bg-card p-3">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                        Settlement
-                      </p>
-                      <p className="mt-1 text-sm font-semibold text-foreground">Final reconciliation</p>
-                    </div>
+                    ))}
                   </div>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           </div>
           </div>
         </section>
@@ -707,15 +656,7 @@ export default function Home() {
           <div className="rounded-[2rem] border border-border/70 bg-card/85 px-6 py-8 shadow-[0_20px_70px_-54px_rgba(15,23,42,0.28)] sm:px-8">
             <div className="grid gap-8 lg:grid-cols-[1.2fr_0.8fr_0.8fr_0.8fr]">
               <div className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
-                    <Landmark className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <p className="text-base font-semibold text-foreground">Easycoin</p>
-                    <p className="text-sm text-muted-foreground">FinTech for managed property profits</p>
-                  </div>
-                </div>
+                <BrandLogo />
                 <p className="max-w-sm text-sm leading-6 text-muted-foreground">
                   A premium platform for property owners, investors, and enterprise operators building
                   transparent profit participation workflows.
@@ -741,7 +682,7 @@ export default function Home() {
             <Separator className="my-6 bg-border/80" />
 
             <div className="flex flex-col gap-2 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-              <p>(c) 2026 Easycoin. All rights reserved.</p>
+              <p>(c) 2026 Menzel. All rights reserved.</p>
               <p>Built for trust, transparency, and financial technology workflows.</p>
             </div>
           </div>

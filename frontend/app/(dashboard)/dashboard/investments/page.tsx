@@ -6,7 +6,7 @@ import { ArrowLeft, ArrowRight, Building2, Check, CheckCircle2, Coins, Copy, Loa
 import { investments, type Investment } from '@/lib/mock-investments';
 import { formatCurrency, formatDate } from '@/lib/format';
 import { useSession } from '@/lib/session';
-import { getProperties } from '@/lib/backend-api';
+import { getProperties, getPropertyDetails } from '@/lib/backend-api';
 import {
   approveInvestor,
   confirmFunding,
@@ -847,6 +847,8 @@ type InvestorInstrumentRecord = {
   contractId: string;
   instrumentId: string;
   contractBusinessId: string;
+  propertyId?: string;
+  propertyName?: string;
   totalUnits: number;
   investorOfferedUnits: number;
   investorUpfrontPricePerUnit: number;
@@ -943,6 +945,7 @@ function InvestorInvestmentsWorkspace({
         fundingResponse,
         rewardResponse,
         rewardConfirmationResponse,
+        propertyResponse,
       ] = await Promise.all([
         getInstruments(token),
         getSubscriptions(token),
@@ -951,12 +954,18 @@ function InvestorInvestmentsWorkspace({
         getSubscriptionFundingConfirmations(token),
         getPaymentRewards(token),
         getRewardPaymentConfirmations(token),
+        getProperties(token),
       ]);
+
+      const propertyNameById = new Map(
+        propertyResponse.map((property) => [property.propertyId, property.name] as const),
+      );
 
       const normalizedInstruments = instrumentResponse
         .map((event) => {
           const args = getDamlCreateArguments<{
             contractId?: unknown;
+            propertyId?: unknown;
             instrumentId?: unknown;
             totalUnits?: unknown;
             investorOfferedUnits?: unknown;
@@ -968,6 +977,8 @@ function InvestorInvestmentsWorkspace({
             contractId: String(event.contractId),
             contractBusinessId: toStringValue(args.contractId, ''),
             instrumentId: toStringValue(args.instrumentId, ''),
+            propertyId: toStringValue(args.propertyId, ''),
+            propertyName: propertyNameById.get(toStringValue(args.propertyId, '')) ?? 'Property name unavailable',
             totalUnits: toNumber(args.totalUnits),
             investorOfferedUnits: toNumber(args.investorOfferedUnits),
             investorUpfrontPricePerUnit: toNumber(args.investorUpfrontPricePerUnit),
@@ -976,6 +987,36 @@ function InvestorInvestmentsWorkspace({
           };
         })
         .filter((item) => item.instrumentId);
+
+      // Investors may receive the instrument before the property appears in
+      // the general properties list. Resolve any missing names directly from
+      // the property endpoint so the subscription selector remains readable.
+      const missingPropertyIds = Array.from(
+        new Set(
+          normalizedInstruments
+            .map((item) => item.propertyId)
+            .filter((propertyId): propertyId is string => Boolean(propertyId && !propertyNameById.has(propertyId))),
+        ),
+      );
+      const propertyDetails = await Promise.all(
+        missingPropertyIds.map(async (propertyId) => {
+          try {
+            return await getPropertyDetails(token, propertyId);
+          } catch {
+            return null;
+          }
+        }),
+      );
+      propertyDetails.forEach((property) => {
+        if (property?.propertyId && property.name) {
+          propertyNameById.set(property.propertyId, property.name);
+        }
+      });
+
+      const instrumentsWithPropertyNames = normalizedInstruments.map((item) => ({
+        ...item,
+        propertyName: propertyNameById.get(item.propertyId) ?? 'Property name unavailable',
+      }));
 
       const normalizedSubscriptions = subscriptionResponse
         .map((event) => {
@@ -1071,7 +1112,7 @@ function InvestorInvestmentsWorkspace({
         })
         .filter((item) => item.instrumentId);
 
-      setInstruments(normalizedInstruments as InvestorInstrumentRecord[]);
+      setInstruments(instrumentsWithPropertyNames as InvestorInstrumentRecord[]);
       setSubscriptions(normalizedSubscriptions as InvestorSubscriptionRecord[]);
       setHoldings(normalizedHoldings as InvestorHoldingRecord[]);
       setHolderHoldings(
@@ -1097,7 +1138,7 @@ function InvestorInvestmentsWorkspace({
       setRewards(normalizedRewards as InvestorRewardRecord[]);
       setRewardConfirmations(normalizedRewardConfirmations as InvestorRewardConfirmationRecord[]);
 
-      const selectedInstrumentId = form.instrumentId || normalizedInstruments[0]?.instrumentId || '';
+      const selectedInstrumentId = form.instrumentId || instrumentsWithPropertyNames[0]?.instrumentId || '';
       if (selectedInstrumentId) {
         const [instrumentDetailResponse, instrumentHoldingResponse] = await Promise.all([
           getInstrumentById(token, selectedInstrumentId),
@@ -1183,8 +1224,8 @@ function InvestorInvestmentsWorkspace({
         setSelectedHolding(null);
       }
 
-      if (!form.instrumentId && normalizedInstruments[0]) {
-        const first = normalizedInstruments[0];
+      if (!form.instrumentId && instrumentsWithPropertyNames[0]) {
+        const first = instrumentsWithPropertyNames[0];
         setForm((current) => ({
           ...current,
           instrumentId: first.instrumentId,
@@ -1326,7 +1367,7 @@ function InvestorInvestmentsWorkspace({
                   <SelectContent>
                     {instruments.map((item) => (
                       <SelectItem key={item.contractId} value={item.instrumentId}>
-                        {item.instrumentId} - {item.status}
+                        {item.instrumentId} · {item.propertyName || 'Property name unavailable'} · {item.status}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1382,6 +1423,7 @@ function InvestorInvestmentsWorkspace({
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="font-medium">{item.instrumentId}</p>
+                      <p className="text-sm font-medium text-foreground">{item.propertyName || 'Property name unavailable'}</p>
                       <p className="text-sm text-muted-foreground">{item.contractBusinessId}</p>
                     </div>
                     <StatusBadge status={item.status} />

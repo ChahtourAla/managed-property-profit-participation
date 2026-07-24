@@ -6,11 +6,11 @@ import { SessionProvider } from '@/lib/session';
 
 export const metadata: Metadata = {
   title: {
-    default: 'EasyCoin POC',
-    template: '%s | EasyCoin POC',
+    default: 'Menzel',
+    template: '%s | Menzel',
   },
   description:
-    'Tokenized managed property profit participation platform for EasyCoin.',
+    'Tokenized managed property profit participation platform by Menzel.',
 };
 
 export default function RootLayout({

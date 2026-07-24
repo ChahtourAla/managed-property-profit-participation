@@ -51,7 +51,7 @@ export default function LoginPage() {
     <Card className="border-border/70 bg-card shadow-[0_24px_80px_-44px_rgba(15,23,42,0.45)]">
       <CardHeader className="space-y-1">
         <CardTitle className="text-2xl font-semibold tracking-tight">
-          EasyCoin POC login
+          Menzel workspace login
         </CardTitle>
         <CardDescription>
           Use a demo role to open its dedicated interface.

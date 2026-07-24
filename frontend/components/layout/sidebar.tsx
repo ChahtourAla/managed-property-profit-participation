@@ -3,7 +3,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { ChevronsLeft, Landmark } from 'lucide-react';
+import { ChevronsLeft } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { getNavForRole } from '@/lib/navigation';
@@ -11,6 +11,7 @@ import { useSidebar } from './sidebar-provider';
 import { useSession } from '@/lib/session';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { BrandLogo } from '@/components/brand-logo';
 import {
   Tooltip,
   TooltipContent,
@@ -31,20 +32,9 @@ export function Sidebar() {
         collapsed ? 'w-[72px]' : 'w-64'
       )}
     >
-      <div className="flex h-16 items-center gap-2.5 border-b border-sidebar-border/80 px-4">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-lg shadow-primary/15">
-          <Landmark className="h-5 w-5" />
-        </div>
-        {!collapsed && (
-          <div className="flex flex-col overflow-hidden">
-            <span className="text-sm font-semibold leading-tight tracking-tight">
-              EasyCoin
-            </span>
-            <span className="text-xs text-muted-foreground leading-tight">
-              {session.role} workspace
-            </span>
-          </div>
-        )}
+      <div className="flex h-16 items-center border-b border-sidebar-border/80 px-4">
+        <BrandLogo compact={collapsed} className={collapsed ? 'mx-auto' : ''} />
+        {!collapsed && <span className="ml-auto text-[10px] uppercase tracking-[0.18em] text-sidebar-foreground/60">{session.role}</span>}
       </div>
 
       <ScrollArea className="flex-1 px-3 py-4">

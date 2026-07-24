@@ -4,44 +4,46 @@
 
 @layer base {
   :root {
-    --font-sans: 'Inter', 'Avenir Next', 'Segoe UI', sans-serif;
+    --font-sans: 'Montserrat', 'Avenir Next', 'Segoe UI', sans-serif;
+    --font-serif: 'Cormorant Garamond', Georgia, serif;
     --font-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
-    --background: 220 33% 98%;
-    --foreground: 222 47% 11%;
-    --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
-    --primary: 221 83% 53%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 220 16% 95%;
-    --secondary-foreground: 222 47% 11%;
-    --muted: 220 16% 95%;
-    --muted-foreground: 220 9% 46%;
-    --accent: 220 16% 95%;
-    --accent-foreground: 222 47% 11%;
+    --brand-gold: #c4a24e;
+    --background: 45 33% 97%;
+    --foreground: 158 38% 9%;
+    --card: 45 43% 99%;
+    --card-foreground: 158 38% 9%;
+    --popover: 45 43% 99%;
+    --popover-foreground: 158 38% 9%;
+    --primary: 163 51% 22%;
+    --primary-foreground: 45 43% 97%;
+    --secondary: 42 22% 91%;
+    --secondary-foreground: 158 38% 9%;
+    --muted: 42 22% 91%;
+    --muted-foreground: 39 10% 43%;
+    --accent: 42 22% 91%;
+    --accent-foreground: 158 38% 9%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
-    --border: 220 13% 88%;
-    --input: 220 13% 88%;
-    --ring: 221 83% 53%;
-    --success: 151 55% 35%;
+    --border: 39 18% 80%;
+    --input: 39 18% 80%;
+    --ring: 163 51% 22%;
+    --success: 158 42% 31%;
     --success-foreground: 0 0% 98%;
     --warning: 35 92% 48%;
     --warning-foreground: 0 0% 98%;
-    --info: 198 90% 42%;
+    --info: 163 51% 22%;
     --info-foreground: 0 0% 98%;
-    --sidebar: 0 0% 100%;
-    --sidebar-foreground: 222 47% 11%;
-    --sidebar-border: 220 13% 88%;
-    --sidebar-accent: 220 16% 95%;
-    --sidebar-accent-foreground: 222 47% 11%;
-    --chart-1: 221 83% 53%;
-    --chart-2: 151 55% 35%;
-    --chart-3: 198 90% 42%;
-    --chart-4: 35 92% 48%;
-    --chart-5: 268 67% 52%;
-    --radius: 1rem;
+    --sidebar: 158 38% 9%;
+    --sidebar-foreground: 45 43% 97%;
+    --sidebar-border: 163 28% 22%;
+    --sidebar-accent: 163 42% 18%;
+    --sidebar-accent-foreground: 45 43% 97%;
+    --chart-1: 163 51% 22%;
+    --chart-2: 42 48% 45%;
+    --chart-3: 158 42% 31%;
+    --chart-4: 39 55% 42%;
+    --chart-5: 45 65% 58%;
+    --radius: 0.85rem;
   }
 
   .dark {
@@ -90,6 +92,27 @@
   body {
     @apply bg-background text-foreground;
     font-feature-settings: 'rlig' 1, 'calt' 1;
+    background-image: radial-gradient(circle at 85% 0%, hsl(42 42% 92% / 0.45), transparent 32rem);
+  }
+
+  .font-serif { font-family: var(--font-serif); }
+  .brand-mark {
+    display: inline-flex;
+    width: 2.5rem;
+    height: 2.5rem;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    border-radius: 0.8rem;
+    color: hsl(var(--primary-foreground));
+    background: hsl(var(--primary));
+    box-shadow: 0 10px 24px hsl(var(--primary) / 0.22);
+  }
+  .brand-mark svg { width: 1.75rem; height: 1.75rem; }
+
+  .landing-starfield {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'%3E%3Cg fill='none' stroke='%23C4A24E' stroke-width='2' opacity='.18'%3E%3Cpath d='M45 8l9 28 30 1-24 18 8 29-24-17-25 17 9-29-24-18 30-1z'/%3E%3Ccircle cx='45' cy='53' r='8'/%3E%3Cpath d='M135 98l9 28 30 1-24 18 8 29-24-17-25 17 9-29-24-18 30-1z'/%3E%3Ccircle cx='135' cy='143' r='8'/%3E%3C/g%3E%3C/svg%3E");
+    background-size: 180px 180px;
   }
 
   code,

@@ -38,7 +38,7 @@ type SessionContextValue = {
   signOut: () => void;
 };
 
-const STORAGE_KEY = 'easycoin.demo.session';
+export const SESSION_STORAGE_KEY = 'easycoin.demo.session';
 const PARTY_COUNTER_KEY = 'easycoin.party.counters';
 
 type PartyCounterState = Partial<Record<AppRole, number>>;
@@ -119,18 +119,14 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   const persistSession = React.useCallback((nextSession: SessionState) => {
     setSession(nextSession);
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextSession));
+    window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(nextSession));
   }, []);
 
   React.useEffect(() => {
     const hydrate = async () => {
       try {
-        const raw = window.localStorage.getItem(STORAGE_KEY);
+        const raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
         if (!raw) {
-          window.localStorage.setItem(
-            STORAGE_KEY,
-            JSON.stringify(defaultSession)
-          );
           setSession(defaultSession);
           return;
         }
@@ -148,7 +144,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
               persistSession(nextSession);
               return;
             } catch {
-              window.localStorage.removeItem(STORAGE_KEY);
+              window.localStorage.removeItem(SESSION_STORAGE_KEY);
               setSession(defaultSession);
               return;
             }
@@ -269,7 +265,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   );
 
   const signOut = React.useCallback(() => {
-    window.localStorage.removeItem(STORAGE_KEY);
+    window.localStorage.removeItem(SESSION_STORAGE_KEY);
     setSession(defaultSession);
   }, []);
 

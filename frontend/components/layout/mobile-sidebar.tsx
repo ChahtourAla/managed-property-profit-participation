@@ -3,7 +3,6 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Landmark } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { getNavForRole } from '@/lib/navigation';
@@ -16,6 +15,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { BrandLogo } from '@/components/brand-logo';
 
 export function MobileSidebar() {
   const pathname = usePathname();
@@ -27,12 +27,8 @@ export function MobileSidebar() {
     <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
       <SheetContent side="left" className="w-72 p-0">
         <SheetHeader className="h-16 flex-row items-center gap-2.5 border-b border-sidebar-border px-4 space-y-0">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <Landmark className="h-5 w-5" />
-          </div>
-          <SheetTitle className="text-base font-semibold">
-            EasyCoin {session.role}
-          </SheetTitle>
+          <BrandLogo />
+          <SheetTitle className="sr-only">Menzel {session.role}</SheetTitle>
         </SheetHeader>
         <ScrollArea className="h-[calc(100vh-4rem)] px-3 py-4">
           <nav className="flex flex-col gap-6">
