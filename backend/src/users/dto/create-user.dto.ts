@@ -6,6 +6,7 @@ import {
   IsString,
 } from 'class-validator';
 
+import { UserApprovalStatus } from '../../common/enums/user-approval-status.enum';
 import { UserRole } from '../../common/enums/user-role.enum';
 
 export class CreateUserDto {
@@ -25,6 +26,10 @@ export class CreateUserDto {
   @IsOptional()
   @IsString()
   partyId?: string;
+
+  @IsOptional()
+  @IsEnum(UserApprovalStatus)
+  approvalStatus?: UserApprovalStatus;
 
   @IsOptional()
   @IsBoolean()

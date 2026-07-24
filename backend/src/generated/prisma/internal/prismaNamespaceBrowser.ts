@@ -51,7 +51,11 @@ export const AnyNull = runtime.AnyNull
 
 
 export const ModelName = {
-  User: 'User'
+  User: 'User',
+  Property: 'Property',
+  PropertyImage: 'PropertyImage',
+  RentalHistory: 'RentalHistory',
+  PropertyDocument: 'PropertyDocument'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -74,12 +78,87 @@ export const UserScalarFieldEnum = {
   fullName: 'fullName',
   role: 'role',
   partyId: 'partyId',
+  approvalStatus: 'approvalStatus',
   isActive: 'isActive',
+  approvedById: 'approvedById',
+  approvedAt: 'approvedAt',
+  rejectedById: 'rejectedById',
+  rejectedAt: 'rejectedAt',
+  rejectionReason: 'rejectionReason',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 } as const
 
 export type UserScalarFieldEnum = (typeof UserScalarFieldEnum)[keyof typeof UserScalarFieldEnum]
+
+
+export const PropertyScalarFieldEnum = {
+  id: 'id',
+  propertyId: 'propertyId',
+  ownerUserId: 'ownerUserId',
+  ownerPartyId: 'ownerPartyId',
+  name: 'name',
+  description: 'description',
+  propertyType: 'propertyType',
+  address: 'address',
+  city: 'city',
+  country: 'country',
+  surfaceArea: 'surfaceArea',
+  rooms: 'rooms',
+  bedrooms: 'bedrooms',
+  bathrooms: 'bathrooms',
+  expectedRentalIncome: 'expectedRentalIncome',
+  expectedExpenses: 'expectedExpenses',
+  currency: 'currency',
+  status: 'status',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type PropertyScalarFieldEnum = (typeof PropertyScalarFieldEnum)[keyof typeof PropertyScalarFieldEnum]
+
+
+export const PropertyImageScalarFieldEnum = {
+  id: 'id',
+  propertyDbId: 'propertyDbId',
+  url: 'url',
+  caption: 'caption',
+  isMain: 'isMain',
+  sortOrder: 'sortOrder',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type PropertyImageScalarFieldEnum = (typeof PropertyImageScalarFieldEnum)[keyof typeof PropertyImageScalarFieldEnum]
+
+
+export const RentalHistoryScalarFieldEnum = {
+  id: 'id',
+  propertyDbId: 'propertyDbId',
+  periodLabel: 'periodLabel',
+  rentalIncome: 'rentalIncome',
+  expenses: 'expenses',
+  occupancyRate: 'occupancyRate',
+  netIncome: 'netIncome',
+  currency: 'currency',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type RentalHistoryScalarFieldEnum = (typeof RentalHistoryScalarFieldEnum)[keyof typeof RentalHistoryScalarFieldEnum]
+
+
+export const PropertyDocumentScalarFieldEnum = {
+  id: 'id',
+  propertyDbId: 'propertyDbId',
+  name: 'name',
+  url: 'url',
+  documentHash: 'documentHash',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type PropertyDocumentScalarFieldEnum = (typeof PropertyDocumentScalarFieldEnum)[keyof typeof PropertyDocumentScalarFieldEnum]
 
 
 export const SortOrder = {

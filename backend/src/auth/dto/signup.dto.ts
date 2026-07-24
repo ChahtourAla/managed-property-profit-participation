@@ -36,16 +36,8 @@ export class SignupDto {
   @ApiProperty({
     enum: UserRole,
     example: UserRole.OWNER,
-    description: 'User role in the platform',
+    description: 'Requested user role in the platform',
   })
   @IsEnum(UserRole)
   role!: UserRole;
-
-  @ApiPropertyOptional({
-    example: 'Owner::1220abc...',
-    description: 'Linked Daml party ID',
-  })
-  @IsOptional()
-  @IsString()
-  partyId?: string;
 }

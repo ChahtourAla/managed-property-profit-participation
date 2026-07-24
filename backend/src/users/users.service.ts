@@ -1,9 +1,11 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 
+import { UserApprovalStatus } from '../common/enums/user-approval-status.enum';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 
@@ -23,17 +25,7 @@ export class UsersService {
     }
 
     if (dto.partyId) {
-      const existingPartyUser = await this.prisma.user.findUnique({
-        where: {
-          partyId: dto.partyId,
-        },
-      });
-
-      if (existingPartyUser) {
-        throw new ConflictException(
-          'This Daml party is already linked to another user',
-        );
-      }
+      await this.ensurePartyIsAvailable(dto.partyId);
     }
 
     return this.prisma.user.create({
@@ -43,7 +35,8 @@ export class UsersService {
         fullName: dto.fullName,
         role: dto.role,
         partyId: dto.partyId,
-        isActive: dto.isActive ?? true,
+        approvalStatus: dto.approvalStatus ?? UserApprovalStatus.PENDING,
+        isActive: dto.isActive ?? false,
       },
     });
   }
@@ -64,11 +57,19 @@ export class UsersService {
     });
   }
 
-  async findActiveById(id: string) {
+  async findApprovedActiveById(id: string) {
     const user = await this.findById(id);
 
-    if (!user || !user.isActive) {
-      throw new NotFoundException('User not found or inactive');
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (user.approvalStatus !== UserApprovalStatus.APPROVED) {
+      throw new BadRequestException('User account is not approved');
+    }
+
+    if (!user.isActive) {
+      throw new BadRequestException('User account is inactive');
     }
 
     return user;
@@ -93,10 +94,169 @@ export class UsersService {
         fullName: true,
         role: true,
         partyId: true,
+        approvalStatus: true,
+        isActive: true,
+        approvedById: true,
+        approvedAt: true,
+        rejectedById: true,
+        rejectedAt: true,
+        rejectionReason: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+  }
+
+  async listPendingUsers() {
+    return this.prisma.user.findMany({
+      where: {
+        approvalStatus: UserApprovalStatus.PENDING,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        partyId: true,
+        approvalStatus: true,
         isActive: true,
         createdAt: true,
         updatedAt: true,
       },
     });
+  }
+
+  async approveUser(userId: string, adminId: string, partyId: string) {
+    const user = await this.findById(userId);
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (user.approvalStatus === UserApprovalStatus.APPROVED) {
+      throw new BadRequestException('User is already approved');
+    }
+
+    await this.ensurePartyIsAvailable(partyId, userId);
+
+    return this.prisma.user.update({
+      where: {
+        id: userId,
+      },
+      data: {
+        partyId,
+        approvalStatus: UserApprovalStatus.APPROVED,
+        isActive: true,
+        approvedById: adminId,
+        approvedAt: new Date(),
+        rejectedById: null,
+        rejectedAt: null,
+        rejectionReason: null,
+      },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        partyId: true,
+        approvalStatus: true,
+        isActive: true,
+        approvedById: true,
+        approvedAt: true,
+      },
+    });
+  }
+
+  async rejectUser(userId: string, adminId: string, reason: string) {
+    const user = await this.findById(userId);
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return this.prisma.user.update({
+      where: {
+        id: userId,
+      },
+      data: {
+        approvalStatus: UserApprovalStatus.REJECTED,
+        isActive: false,
+        rejectedById: adminId,
+        rejectedAt: new Date(),
+        rejectionReason: reason,
+      },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        partyId: true,
+        approvalStatus: true,
+        isActive: true,
+        rejectedById: true,
+        rejectedAt: true,
+        rejectionReason: true,
+      },
+    });
+  }
+
+  async deactivateUser(userId: string) {
+    await this.ensureUserExists(userId);
+
+    return this.prisma.user.update({
+      where: {
+        id: userId,
+      },
+      data: {
+        isActive: false,
+      },
+    });
+  }
+
+  async reactivateUser(userId: string) {
+    const user = await this.ensureUserExists(userId);
+
+    if (user.approvalStatus !== UserApprovalStatus.APPROVED) {
+      throw new BadRequestException('Only approved users can be reactivated');
+    }
+
+    return this.prisma.user.update({
+      where: {
+        id: userId,
+      },
+      data: {
+        isActive: true,
+      },
+    });
+  }
+
+  private async ensureUserExists(userId: string) {
+    const user = await this.findById(userId);
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return user;
+  }
+
+  private async ensurePartyIsAvailable(
+    partyId: string,
+    currentUserId?: string,
+  ) {
+    const existingPartyUser = await this.prisma.user.findUnique({
+      where: {
+        partyId,
+      },
+    });
+
+    if (existingPartyUser && existingPartyUser.id !== currentUserId) {
+      throw new ConflictException(
+        'This Daml party is already linked to another user',
+      );
+    }
   }
 }

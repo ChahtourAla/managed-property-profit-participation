@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 
+import { UserApprovalStatus } from '../../common/enums/user-approval-status.enum';
 import { UserRole } from '../../common/enums/user-role.enum';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.type';
 import { ROLES_KEY } from '../decorators/roles.decorator';
@@ -29,6 +30,10 @@ export class RolesGuard implements CanActivate {
 
     if (!user) {
       throw new ForbiddenException('User is not authenticated');
+    }
+
+    if (user.approvalStatus !== UserApprovalStatus.APPROVED) {
+      throw new ForbiddenException('User account is not approved');
     }
 
     if (!user.isActive) {

@@ -1,10 +1,15 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 
+import { UserApprovalStatus } from '../common/enums/user-approval-status.enum';
 import { UserRole } from '../common/enums/user-role.enum';
-import { AuthenticatedUser } from '../common/types/authenticated-user.type';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { UsersService } from '../users/users.service';
 import { SigninDto } from './dto/signin.dto';
 import { SignupDto } from './dto/signup.dto';
@@ -25,24 +30,27 @@ export class AuthService {
       passwordHash,
       fullName: dto.fullName,
       role: dto.role,
-      partyId: dto.partyId,
-      isActive: true,
+      approvalStatus: UserApprovalStatus.PENDING,
+      isActive: false,
     });
 
-    return this.buildAuthResponse({
-      id: user.id,
-      email: user.email,
-      fullName: user.fullName,
-      role: user.role as UserRole,
-      partyId: user.partyId,
-      isActive: user.isActive,
-    });
+    return {
+      message: 'Account created successfully. Waiting for admin approval.',
+      user: {
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        role: user.role,
+        approvalStatus: user.approvalStatus,
+        isActive: user.isActive,
+      },
+    };
   }
 
   async signin(dto: SigninDto) {
     const user = await this.usersService.findByEmail(dto.email);
 
-    if (!user || !user.isActive) {
+    if (!user) {
       throw new UnauthorizedException('Invalid email or password');
     }
 
@@ -52,12 +60,27 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
+    if (user.approvalStatus === UserApprovalStatus.PENDING) {
+      throw new ForbiddenException(
+        'Your account is waiting for admin approval.',
+      );
+    }
+
+    if (user.approvalStatus === UserApprovalStatus.REJECTED) {
+      throw new ForbiddenException('Your account request was rejected.');
+    }
+
+    if (!user.isActive) {
+      throw new ForbiddenException('Your account is inactive.');
+    }
+
     return this.buildAuthResponse({
       id: user.id,
       email: user.email,
       fullName: user.fullName,
       role: user.role as UserRole,
       partyId: user.partyId,
+      approvalStatus: user.approvalStatus as UserApprovalStatus,
       isActive: user.isActive,
     });
   }
