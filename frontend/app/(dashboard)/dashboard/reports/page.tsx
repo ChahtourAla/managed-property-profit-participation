@@ -45,6 +45,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { formatCurrency } from '@/lib/format';
 import { toast } from 'sonner';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 const summaryStats = [
   { label: 'Net profit before fee', value: 96000, icon: TrendingUp },
@@ -648,6 +649,7 @@ function AuditorReportsWorkspace({ token }: { token: string }) {
   const [loading, setLoading] = React.useState(true);
   const [refreshing, setRefreshing] = React.useState(false);
   const [accepting, setAccepting] = React.useState<string | null>(null);
+  const [selectedReport, setSelectedReport] = React.useState<InvestorReportSummary | null>(null);
 
   const mapReport = (event: { contractId: string; createArguments?: Record<string, unknown> }) => {
     const args = getDamlCreateArguments<{
@@ -810,13 +812,13 @@ function AuditorReportsWorkspace({ token }: { token: string }) {
               <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-sm text-muted-foreground">No performance report visible.</div>
             ) : (
               reports.map((item) => (
-                <div key={item.contractId} className="rounded-xl border border-border/60 bg-background/60 p-4">
+                <div key={item.contractId} role="button" tabIndex={0} onClick={() => setSelectedReport(item)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setSelectedReport(item); }} className="cursor-pointer rounded-xl border border-border/60 bg-background/60 p-4 transition hover:border-primary/40 hover:shadow-sm">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0">
                       <p className="font-medium">{item.instrumentId}</p>
                       <p className="truncate text-sm text-muted-foreground">{item.periodLabel} - {item.reportHash}</p>
                     </div>
-                    <Button size="sm" className="gap-2" onClick={() => handleAcceptReport(item.contractId)} disabled={accepting === item.contractId}>
+                    <Button size="sm" className="gap-2" onClick={(event) => { event.stopPropagation(); void handleAcceptReport(item.contractId); }} disabled={accepting === item.contractId}>
                       {accepting === item.contractId ? <Loader2 className="h-4 w-4 animate-spin" /> : <BadgeCheck className="h-4 w-4" />}
                       Accept
                     </Button>
@@ -881,6 +883,26 @@ function AuditorReportsWorkspace({ token }: { token: string }) {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={Boolean(selectedReport)} onOpenChange={(open) => !open && setSelectedReport(null)}>
+        <DialogContent className="sm:max-w-xl">
+          {selectedReport && <>
+            <DialogHeader>
+              <DialogTitle>Performance report details</DialogTitle>
+              <DialogDescription>Review the report information before accepting it.</DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {[
+                ['Instrument', selectedReport.instrumentId],
+                ['Period', selectedReport.periodLabel],
+                ['Report hash', selectedReport.reportHash],
+                ['Daml contract ID', selectedReport.contractId],
+              ].map(([label, value]) => <div key={label} className="rounded-xl border border-border/70 bg-muted/20 p-4"><p className="text-xs uppercase tracking-wider text-muted-foreground">{label}</p><p className="mt-2 break-all text-sm font-medium">{value || 'Not provided'}</p></div>)}
+            </div>
+            <Button className="w-full gap-2" onClick={() => { void handleAcceptReport(selectedReport.contractId); setSelectedReport(null); }} disabled={accepting === selectedReport.contractId}>{accepting === selectedReport.contractId && <Loader2 className="h-4 w-4 animate-spin" />}{accepting === selectedReport.contractId ? 'Accepting...' : 'Accept report'}</Button>
+          </>}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

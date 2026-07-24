@@ -25,7 +25,15 @@ async function main() {
   });
 
   if (existingAdmin) {
-    console.log('Admin user already exists.');
+    await prisma.user.update({
+      where: { email },
+      data: {
+        role: 'ADMIN',
+        approvalStatus: 'APPROVED',
+        isActive: true,
+      },
+    });
+    console.log('Admin user verified and activated.');
     await prisma.$disconnect();
     return;
   }

@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   ArrowLeft,
   ArrowRight,
@@ -14,6 +15,15 @@ import {
 } from 'lucide-react';
 
 import { useSession } from '@/lib/session';
+import {
+  BackendApiError,
+  approveProperty,
+  createPropertyProfile,
+  getMyProperties,
+  getProperties,
+  getPropertyDetails,
+  type BackendProperty,
+} from '@/lib/backend-api';
 import {
   createOwnerDraft,
   getDamlCreateArguments,
@@ -66,6 +76,109 @@ type EasycoinDraftReviewProps = {
   token: string;
 };
 
+function PropertiesDirectory({ token }: { token: string }) {
+  const router = useRouter();
+  const [properties, setProperties] = React.useState<BackendProperty[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [approvingId, setApprovingId] = React.useState<string | null>(null);
+
+  const loadProperties = React.useCallback(async () => {
+    try {
+      setLoading(true);
+      setProperties(await getProperties(token));
+    } catch (loadError) {
+      toast.error(loadError instanceof Error ? loadError.message : 'Unable to load properties');
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  React.useEffect(() => {
+    void loadProperties();
+  }, [loadProperties]);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      await loadProperties();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleApprove = async (propertyId: string) => {
+    setApprovingId(propertyId);
+    try {
+      const updated = await approveProperty(token, propertyId);
+      setProperties((current) => current.map((property) => property.propertyId === updated.propertyId ? updated : property));
+      toast.success('Property approved');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to approve property');
+    } finally {
+      setApprovingId(null);
+    }
+  };
+
+  return (
+    <Card className="mt-6 border-border/70">
+      <CardHeader className="flex flex-row items-start justify-between gap-4">
+        <div>
+          <CardTitle className="text-xl">Property directory</CardTitle>
+          <CardDescription>All property profiles available to your role.</CardDescription>
+        </div>
+        <Button variant="outline" size="sm" className="gap-2" onClick={refresh} disabled={refreshing}>
+          {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          Refresh
+        </Button>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading properties...
+          </div>
+        ) : properties.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">
+            No property profile found.
+          </p>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {properties.map((property) => (
+              <div key={property.propertyId} role="link" tabIndex={0} onClick={() => router.push(`/dashboard/properties/${property.propertyId}`)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') router.push(`/dashboard/properties/${property.propertyId}`); }} className="cursor-pointer rounded-xl border border-border/70 bg-background/70 p-4 transition hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold">{property.name}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{property.propertyId}</p>
+                  </div>
+                  <StatusBadge status={property.status} />
+                </div>
+                <p className="mt-3 text-sm text-muted-foreground">
+                  {[property.city, property.country].filter(Boolean).join(', ') || 'Location not provided'}
+                </p>
+                <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground">Income</p>
+                    <p className="mt-1 font-medium">
+                      {property.expectedRentalIncome != null ? formatCurrency(property.expectedRentalIncome) : '—'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground">Expenses</p>
+                    <p className="mt-1 font-medium">
+                      {property.expectedExpenses != null ? formatCurrency(property.expectedExpenses) : '—'}
+                    </p>
+                  </div>
+                </div>
+                {property.status === 'PENDING_REVIEW' && <Button type="button" className="mt-4 w-full gap-2" onClick={(event) => { event.stopPropagation(); void handleApprove(property.propertyId); }} disabled={approvingId === property.propertyId}>{approvingId === property.propertyId && <Loader2 className="h-4 w-4 animate-spin" />}{approvingId === property.propertyId ? 'Approving...' : 'Approve property'}</Button>}
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 type DraftFormState = {
   contractId: string;
   propertyId: string;
@@ -80,6 +193,30 @@ type DraftFormState = {
   expectedInvestorSettlement: string;
   expectedUpfrontFunding: string;
   currency: string;
+};
+
+type PropertyProfileFormState = {
+  description: string;
+  propertyType: string;
+  address: string;
+  city: string;
+  country: string;
+  surfaceArea: string;
+  rooms: string;
+  bedrooms: string;
+  bathrooms: string;
+};
+
+const initialPropertyProfileForm: PropertyProfileFormState = {
+  description: '',
+  propertyType: 'Apartment',
+  address: '',
+  city: 'Casablanca',
+  country: 'Morocco',
+  surfaceArea: '',
+  rooms: '',
+  bedrooms: '',
+  bathrooms: '',
 };
 
 const initialFormState: DraftFormState = {
@@ -772,6 +909,16 @@ export default function PropertiesPage() {
   const [refreshing, setRefreshing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [ownerIdCopied, setOwnerIdCopied] = React.useState(false);
+  const [propertyProfileForm, setPropertyProfileForm] = React.useState<PropertyProfileFormState>(
+    initialPropertyProfileForm,
+  );
+  const [creatingProperty, setCreatingProperty] = React.useState(false);
+  const [propertyProfileCreated, setPropertyProfileCreated] = React.useState(false);
+  const [propertyProfileId, setPropertyProfileId] = React.useState<string | null>(null);
+  const [myProperties, setMyProperties] = React.useState<BackendProperty[]>([]);
+  const [selectedPropertyId, setSelectedPropertyId] = React.useState<string | null>(null);
+  const [selectedProperty, setSelectedProperty] = React.useState<BackendProperty | null>(null);
+  const [propertyDetailsLoading, setPropertyDetailsLoading] = React.useState(false);
 
   const handleCopyOwnerId = async () => {
     await navigator.clipboard.writeText(session.partyId);
@@ -786,9 +933,10 @@ export default function PropertiesPage() {
     setLoading(true);
 
     try {
-      const [draftResponse, validatedResponse] = await Promise.all([
+      const [draftResponse, validatedResponse, propertyResponse] = await Promise.all([
         getOwnerDrafts(session.accessToken),
         getValidatedContracts(session.accessToken),
+        getMyProperties(session.accessToken),
       ]);
 
       const nextDrafts = draftResponse
@@ -800,12 +948,24 @@ export default function PropertiesPage() {
 
       setDrafts(nextDrafts);
       setValidatedContracts(nextValidatedContracts);
+      setMyProperties(propertyResponse);
 
       const existingRecords = [...nextDrafts, ...nextValidatedContracts];
+      const firstProperty = propertyResponse[0];
+      setSelectedPropertyId(firstProperty?.propertyId ?? null);
+      setPropertyProfileId(firstProperty?.propertyId ?? null);
+      setPropertyProfileCreated(Boolean(firstProperty));
       setForm((current) => ({
         ...current,
         contractId: nextSequenceId('MPC', existingRecords.map((item) => item.contractId)),
-        propertyId: nextSequenceId('PROP', existingRecords.map((item) => item.propertyId)),
+        propertyId: firstProperty?.propertyId ?? nextSequenceId('PROP', [
+          ...existingRecords.map((item) => item.propertyId),
+          ...propertyResponse.map((item) => item.propertyId),
+        ]),
+        propertyName: firstProperty?.name ?? current.propertyName,
+        expectedRentalIncome: firstProperty?.expectedRentalIncome?.toString() ?? current.expectedRentalIncome,
+        expectedExpenses: firstProperty?.expectedExpenses?.toString() ?? current.expectedExpenses,
+        currency: firstProperty?.currency ?? current.currency,
       }));
     } catch (loadError) {
       const message =
@@ -834,12 +994,16 @@ export default function PropertiesPage() {
 
   const handleCreateDraft = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!propertyProfileCreated) {
+      toast.error('Create the property profile first');
+      return;
+    }
     setSaving(true);
 
     try {
       const payload: OwnerDraftPayload = {
         contractId: form.contractId.trim(),
-        propertyId: form.propertyId.trim(),
+        propertyId: propertyProfileId ?? form.propertyId.trim(),
         propertyName: form.propertyName.trim(),
         financialPeriod: form.financialPeriod.trim(),
         expectedRentalIncome: toNumber(form.expectedRentalIncome),
@@ -865,6 +1029,93 @@ export default function PropertiesPage() {
     }
   };
 
+  const handleOpenProperty = async (property: BackendProperty) => {
+    setSelectedProperty(property);
+    setPropertyDetailsLoading(true);
+    try {
+      const details = await getPropertyDetails(session.accessToken, property.propertyId);
+      setSelectedProperty(details);
+    } catch (propertyError) {
+      toast.error(propertyError instanceof Error ? propertyError.message : 'Unable to load property details');
+    } finally {
+      setPropertyDetailsLoading(false);
+    }
+  };
+
+  const handlePropertySelection = (propertyId: string) => {
+    const property = myProperties.find((item) => item.propertyId === propertyId);
+    if (!property) return;
+
+    setSelectedPropertyId(property.propertyId);
+    setPropertyProfileId(property.propertyId);
+    setPropertyProfileCreated(true);
+    setForm((current) => ({
+      ...current,
+      propertyId: property.propertyId,
+      propertyName: property.name,
+      expectedRentalIncome: property.expectedRentalIncome?.toString() ?? current.expectedRentalIncome,
+      expectedExpenses: property.expectedExpenses?.toString() ?? current.expectedExpenses,
+      currency: property.currency ?? current.currency,
+    }));
+  };
+
+  const handleCreatePropertyProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreatingProperty(true);
+
+    try {
+      const requestedPropertyId = form.propertyId.trim();
+      const usedPropertyIds = [
+        ...myProperties.map((property) => property.propertyId),
+        ...drafts.map((draft) => draft.propertyId),
+        ...validatedContracts.map((contract) => contract.propertyId),
+      ];
+      const propertyId = usedPropertyIds.includes(requestedPropertyId)
+        ? nextSequenceId('PROP', usedPropertyIds)
+        : requestedPropertyId;
+
+      if (propertyId !== requestedPropertyId) {
+        setForm((current) => ({ ...current, propertyId }));
+      }
+
+      const createdProperty = await createPropertyProfile(session.accessToken, {
+        propertyId,
+        name: form.propertyName.trim(),
+        description: propertyProfileForm.description.trim() || undefined,
+        propertyType: propertyProfileForm.propertyType.trim() || undefined,
+        address: propertyProfileForm.address.trim() || undefined,
+        city: propertyProfileForm.city.trim() || undefined,
+        country: propertyProfileForm.country.trim() || undefined,
+        surfaceArea: propertyProfileForm.surfaceArea
+          ? toNumber(propertyProfileForm.surfaceArea)
+          : undefined,
+        rooms: propertyProfileForm.rooms ? toNumber(propertyProfileForm.rooms) : undefined,
+        bedrooms: propertyProfileForm.bedrooms ? toNumber(propertyProfileForm.bedrooms) : undefined,
+        bathrooms: propertyProfileForm.bathrooms ? toNumber(propertyProfileForm.bathrooms) : undefined,
+        expectedRentalIncome: toNumber(form.expectedRentalIncome),
+        expectedExpenses: toNumber(form.expectedExpenses),
+        currency: form.currency.trim().toUpperCase(),
+      });
+      setPropertyProfileCreated(true);
+      setPropertyProfileId(propertyId);
+      setSelectedPropertyId(propertyId);
+      setMyProperties((current) => [createdProperty, ...current.filter((item) => item.propertyId !== propertyId)]);
+      toast.success(`Property profile ${form.propertyName.trim()} created`);
+    } catch (propertyError) {
+      if (propertyError instanceof BackendApiError && propertyError.status === 409) {
+        setPropertyProfileCreated(true);
+        setPropertyProfileId(form.propertyId.trim());
+        toast.success('This property profile already exists. You can continue to the draft.');
+        return;
+      }
+      const message =
+        propertyError instanceof Error ? propertyError.message : 'Unable to create property profile';
+      toast.error(message);
+    } finally {
+      setCreatingProperty(false);
+    }
+  };
+
   const draftCount = drafts.length;
   const validatedCount = validatedContracts.length;
   const totalTargetFunding = drafts.reduce((sum, item) => sum + item.expectedUpfrontFunding, 0);
@@ -885,7 +1136,12 @@ export default function PropertiesPage() {
 
   if (session.role !== 'OWNER') {
     if (session.role === 'EASYCOIN') {
-      return <EasycoinDraftReview token={session.accessToken} />;
+      return (
+        <>
+          <EasycoinDraftReview token={session.accessToken} />
+          <PropertiesDirectory token={session.accessToken} />
+        </>
+      );
     }
 
     if (session.role === 'AUDITOR') {
@@ -897,7 +1153,15 @@ export default function PropertiesPage() {
     }
 
     if (session.role === 'ADMIN') {
-      return <AdminContractsNotice />;
+      return (
+        <>
+          <PageHeader
+            title="Property directory"
+            description="Review all property profiles returned by the backend."
+          />
+          <PropertiesDirectory token={session.accessToken} />
+        </>
+      );
     }
 
     return (
@@ -926,9 +1190,9 @@ export default function PropertiesPage() {
           Refresh
         </Button>
         <Button size="sm" className="gap-2" asChild>
-          <Link href="#owner-draft-form">
+          <Link href={propertyProfileCreated ? '#owner-draft-form' : '#owner-property-form'}>
             <ArrowRight className="h-4 w-4" />
-            Create draft
+            {propertyProfileCreated ? 'Create draft' : 'Start property profile'}
           </Link>
         </Button>
       </PageHeader>
@@ -972,8 +1236,206 @@ export default function PropertiesPage() {
         </Card>
       </div>
 
+      <Card className="mt-6 border-primary/15 bg-gradient-to-r from-primary/[0.04] via-background to-background">
+        <CardContent className="grid gap-4 p-5 sm:grid-cols-3 sm:p-6">
+          {[
+            {
+              number: '01',
+              title: 'Property profile',
+              description: 'Save the property information.',
+              complete: propertyProfileCreated,
+            },
+            {
+              number: '02',
+              title: 'Contract draft',
+              description: 'Add the financial terms.',
+              complete: false,
+            },
+            {
+              number: '03',
+              title: 'Easycoin review',
+              description: 'Submit the draft for validation.',
+              complete: false,
+            },
+          ].map((step, index) => (
+            <div key={step.number} className="flex items-start gap-3">
+              <div
+                className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
+                  step.complete || (index === 1 && propertyProfileCreated)
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-muted text-muted-foreground'
+                }`}
+              >
+                {step.complete ? '✓' : step.number}
+              </div>
+              <div>
+                <p className="text-sm font-semibold">{step.title}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{step.description}</p>
+              </div>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+
+      <Card className="mt-4 border-border/70">
+        <CardHeader className="space-y-1">
+          <CardTitle className="text-base">My property profiles</CardTitle>
+          <CardDescription>
+            Properties returned by your authenticated owner account.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {myProperties.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-border/70 px-4 py-5 text-sm text-muted-foreground">
+              No property profile has been created yet.
+            </p>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {myProperties.map((property) => (
+                <button
+                  key={property.propertyId}
+                  type="button"
+                  onClick={() => void handleOpenProperty(property)}
+                  className="rounded-xl border border-border/70 bg-background/70 p-4 text-left transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold">{property.name}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{property.propertyId}</p>
+                    </div>
+                    <StatusBadge status={property.status} />
+                  </div>
+                  <p className="mt-3 text-sm text-muted-foreground">
+                    {[property.city, property.country].filter(Boolean).join(', ') || 'Location not provided'}
+                  </p>
+                  <p className="mt-3 text-xs font-medium text-primary">View property details →</p>
+                </button>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <div className="mt-6 grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
-        <Card id="owner-draft-form" className="border-border/70">
+        <Card id="owner-property-form" className="border-border/70">
+          <CardHeader className="space-y-2 border-b border-border/60">
+            <CardTitle className="text-xl">Create property profile</CardTitle>
+            <CardDescription>
+              Save the property information before submitting its contract draft.
+            </CardDescription>
+          </CardHeader>
+          <form onSubmit={handleCreatePropertyProfile}>
+            <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="profilePropertyName">Property name</Label>
+                <Input
+                  id="profilePropertyName"
+                  value={form.propertyName}
+                  onChange={(e) => setForm((current) => ({ ...current, propertyName: e.target.value }))}
+                  placeholder="Enter the property name"
+                />
+                <p className="text-xs text-muted-foreground">
+                  You can update the property name before creating the profile.
+                </p>
+              </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="profileDescription">Description</Label>
+                <Textarea
+                  id="profileDescription"
+                  placeholder="Describe the property for future investors..."
+                  value={propertyProfileForm.description}
+                  onChange={(e) => setPropertyProfileForm((current) => ({ ...current, description: e.target.value }))}
+                  className="min-h-[88px]"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="profilePropertyType">Property type</Label>
+                <Input
+                  id="profilePropertyType"
+                  value={propertyProfileForm.propertyType}
+                  onChange={(e) => setPropertyProfileForm((current) => ({ ...current, propertyType: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="profileAddress">Address</Label>
+                <Input
+                  id="profileAddress"
+                  placeholder="Neighbourhood or street"
+                  value={propertyProfileForm.address}
+                  onChange={(e) => setPropertyProfileForm((current) => ({ ...current, address: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="profileCity">City</Label>
+                <Input
+                  id="profileCity"
+                  value={propertyProfileForm.city}
+                  onChange={(e) => setPropertyProfileForm((current) => ({ ...current, city: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="profileCountry">Country</Label>
+                <Input
+                  id="profileCountry"
+                  value={propertyProfileForm.country}
+                  onChange={(e) => setPropertyProfileForm((current) => ({ ...current, country: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="profileSurfaceArea">Surface area (m²)</Label>
+                <Input
+                  id="profileSurfaceArea"
+                  type="number"
+                  min="0"
+                  value={propertyProfileForm.surfaceArea}
+                  onChange={(e) => setPropertyProfileForm((current) => ({ ...current, surfaceArea: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="profileRooms">Rooms</Label>
+                <Input
+                  id="profileRooms"
+                  type="number"
+                  min="0"
+                  value={propertyProfileForm.rooms}
+                  onChange={(e) => setPropertyProfileForm((current) => ({ ...current, rooms: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="profileBedrooms">Bedrooms</Label>
+                <Input
+                  id="profileBedrooms"
+                  type="number"
+                  min="0"
+                  value={propertyProfileForm.bedrooms}
+                  onChange={(e) => setPropertyProfileForm((current) => ({ ...current, bedrooms: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="profileBathrooms">Bathrooms</Label>
+                <Input
+                  id="profileBathrooms"
+                  type="number"
+                  min="0"
+                  value={propertyProfileForm.bathrooms}
+                  onChange={(e) => setPropertyProfileForm((current) => ({ ...current, bathrooms: e.target.value }))}
+                />
+              </div>
+            </CardContent>
+            <div className="flex flex-col gap-3 border-t border-border/60 px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-muted-foreground">The profile will be linked to the generated property ID.</p>
+              <Button type="submit" className="gap-2" disabled={creatingProperty || !form.propertyId.trim()}>
+                {creatingProperty && <Loader2 className="h-4 w-4 animate-spin" />}
+                {creatingProperty ? 'Creating profile...' : 'Create property profile'}
+              </Button>
+            </div>
+          </form>
+        </Card>
+
+        <Card
+          id="owner-draft-form"
+          className={`border-border/70 ${!propertyProfileCreated ? 'opacity-70' : ''}`}
+        >
           <CardHeader className="space-y-3 border-b border-border/60">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="secondary" className="rounded-full px-3 py-1">
@@ -992,19 +1454,32 @@ export default function PropertiesPage() {
             <div>
               <CardTitle className="text-xl">Create a new draft</CardTitle>
               <CardDescription>
-                Enter the property details and financial terms for your managed contract.
+                {propertyProfileCreated
+                  ? 'Now add the financial terms for your managed contract.'
+                  : 'Complete the property profile above to unlock this step.'}
               </CardDescription>
             </div>
           </CardHeader>
           <form onSubmit={handleCreateDraft}>
-            <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
+            <fieldset className="min-w-0 border-0 p-0" disabled={!propertyProfileCreated || saving}>
+              <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
               <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="propertyName">Property name</Label>
-                <Input
-                  id="propertyName"
-                  value={form.propertyName}
-                  onChange={(e) => setForm((current) => ({ ...current, propertyName: e.target.value }))}
-                />
+                <Label htmlFor="draftProperty">Choose a property</Label>
+                <Select value={selectedPropertyId ?? ''} onValueChange={handlePropertySelection}>
+                  <SelectTrigger id="draftProperty">
+                    <SelectValue placeholder="Select one of your properties" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {myProperties.map((property) => (
+                      <SelectItem key={property.propertyId} value={property.propertyId}>
+                        {property.name} ({property.propertyId})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  The contract draft will be linked to the selected property profile.
+                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="financialPeriod">Financial period</Label>
@@ -1123,16 +1598,17 @@ export default function PropertiesPage() {
                   className="mt-2 min-h-[96px] bg-muted/30"
                 />
               </div>
-            </CardContent>
-            <div className="flex flex-col gap-3 border-t border-border/60 px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-sm text-muted-foreground">
-                Review the details above, then submit your draft for Easycoin review.
-              </p>
-              <Button type="submit" className="gap-2" disabled={saving}>
-                {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-                {saving ? 'Creating draft...' : 'Submit draft'}
-              </Button>
-            </div>
+              </CardContent>
+              <div className="flex flex-col gap-3 border-t border-border/60 px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-muted-foreground">
+                  Review the details above, then submit your draft for Easycoin review.
+                </p>
+                <Button type="submit" className="gap-2" disabled={saving}>
+                  {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {saving ? 'Creating draft...' : 'Submit draft'}
+                </Button>
+              </div>
+            </fieldset>
           </form>
         </Card>
 
@@ -1229,6 +1705,147 @@ export default function PropertiesPage() {
           badgeLabel="Validated"
         />
       </div>
+
+      <Dialog open={Boolean(selectedProperty)} onOpenChange={(open) => !open && setSelectedProperty(null)}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+          {selectedProperty && (
+            <>
+              <DialogHeader>
+                <div className="flex items-center gap-2">
+                  <DialogTitle>{selectedProperty.name}</DialogTitle>
+                  <StatusBadge status={selectedProperty.status} />
+                </div>
+                <DialogDescription>
+                  Complete property profile details for {selectedProperty.propertyId}.
+                </DialogDescription>
+              </DialogHeader>
+
+              {propertyDetailsLoading && (
+                <div className="flex items-center gap-2 rounded-xl border border-border/70 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading complete property details...
+                </div>
+              )}
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border border-border/70 bg-muted/20 p-4 sm:col-span-2">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Property ID</p>
+                  <p className="mt-2 font-medium">{selectedProperty.propertyId}</p>
+                </div>
+                <div className="rounded-xl border border-border/70 p-4">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Property type</p>
+                  <p className="mt-2 font-medium">{selectedProperty.propertyType || 'Not provided'}</p>
+                </div>
+                <div className="rounded-xl border border-border/70 p-4">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Location</p>
+                  <p className="mt-2 font-medium">
+                    {[selectedProperty.address, selectedProperty.city, selectedProperty.country]
+                      .filter(Boolean)
+                      .join(', ') || 'Not provided'}
+                  </p>
+                </div>
+                {selectedProperty.images && selectedProperty.images.length > 0 && (
+                  <div className="rounded-xl border border-border/70 p-4 sm:col-span-2">
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground">Images</p>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      {selectedProperty.images.map((image) => (
+                        <a
+                          key={image.id ?? image.url}
+                          href={image.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="group overflow-hidden rounded-xl border border-border/60 bg-muted/20 hover:bg-muted/40"
+                        >
+                          <img src={image.url} alt={image.caption || selectedProperty.name} className="h-36 w-full object-cover transition-transform group-hover:scale-[1.02]" />
+                          <span className="block truncate px-3 py-2 text-sm text-primary">{image.caption || image.url}</span>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {selectedProperty.rentalHistory && selectedProperty.rentalHistory.length > 0 && (
+                  <div className="rounded-xl border border-border/70 p-4 sm:col-span-2">
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground">Rental history</p>
+                    <div className="mt-3 space-y-2">
+                      {selectedProperty.rentalHistory.map((history) => (
+                        <div key={history.id ?? history.periodLabel} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/30 px-3 py-2 text-sm">
+                          <span className="font-medium">{history.periodLabel}</span>
+                          <span>{formatCurrency(history.rentalIncome)}</span>
+                          <span className="text-muted-foreground">Expenses: {formatCurrency(history.expenses ?? 0)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {selectedProperty.documents && selectedProperty.documents.length > 0 && (
+                  <div className="rounded-xl border border-border/70 p-4 sm:col-span-2">
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground">Documents</p>
+                    <div className="mt-3 space-y-2">
+                      {selectedProperty.documents.map((document) => (
+                        <a
+                          key={document.id ?? document.url}
+                          href={document.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="block rounded-lg border border-border/60 px-3 py-2 text-sm text-primary hover:bg-muted/40"
+                        >
+                          {document.name}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div className="rounded-xl border border-border/70 p-4">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Surface area</p>
+                  <p className="mt-2 font-medium">
+                    {selectedProperty.surfaceArea != null ? `${selectedProperty.surfaceArea} m²` : 'Not provided'}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-border/70 p-4">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Rooms</p>
+                  <p className="mt-2 font-medium">{selectedProperty.rooms ?? 'Not provided'}</p>
+                </div>
+                <div className="rounded-xl border border-border/70 p-4">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Bedrooms / bathrooms</p>
+                  <p className="mt-2 font-medium">
+                    {selectedProperty.bedrooms ?? '—'} / {selectedProperty.bathrooms ?? '—'}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-border/70 p-4">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Currency</p>
+                  <p className="mt-2 font-medium">{selectedProperty.currency || 'MAD'}</p>
+                </div>
+                <div className="rounded-xl border border-border/70 p-4">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Expected rental income</p>
+                  <p className="mt-2 font-medium">
+                    {selectedProperty.expectedRentalIncome != null
+                      ? formatCurrency(selectedProperty.expectedRentalIncome)
+                      : 'Not provided'}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-border/70 p-4">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Expected expenses</p>
+                  <p className="mt-2 font-medium">
+                    {selectedProperty.expectedExpenses != null
+                      ? formatCurrency(selectedProperty.expectedExpenses)
+                      : 'Not provided'}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-border/70 bg-muted/20 p-4 sm:col-span-2">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Description</p>
+                  <p className="mt-2 text-sm leading-6 text-foreground">
+                    {selectedProperty.description || 'No description provided.'}
+                  </p>
+                </div>
+                <div className="text-xs text-muted-foreground sm:col-span-2">
+                  Created {selectedProperty.createdAt ? new Date(selectedProperty.createdAt).toLocaleDateString() : '—'}
+                  {selectedProperty.updatedAt && ` · Updated ${new Date(selectedProperty.updatedAt).toLocaleDateString()}`}
+                </div>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

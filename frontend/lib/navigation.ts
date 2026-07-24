@@ -7,6 +7,8 @@ import {
   Activity,
   User,
   Settings,
+  Users,
+  Building2,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -91,6 +93,20 @@ export const mainNav: NavGroup[] = [
         icon: Activity,
         description: 'System checks and demo preferences',
         roles: ['ADMIN', 'EASYCOIN'],
+      },
+      {
+        title: 'My Properties',
+        href: '/dashboard/my-properties',
+        icon: Building2,
+        description: 'Create and manage your property profiles',
+        roles: ['OWNER'],
+      },
+      {
+        title: 'User management',
+        href: '/dashboard/users',
+        icon: Users,
+        description: 'Review platform users and access status',
+        roles: ['ADMIN'],
       },
     ],
   },

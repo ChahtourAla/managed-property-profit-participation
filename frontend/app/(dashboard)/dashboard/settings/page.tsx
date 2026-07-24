@@ -1,8 +1,10 @@
 'use client';
 
 import * as React from 'react';
-import { Check, Bell, Lock, Globe, Palette, Monitor } from 'lucide-react';
+import { Check, Bell, Lock, Globe, Palette, Monitor, Loader2, Users } from 'lucide-react';
 
+import { getUsers, type BackendUser } from '@/lib/backend-api';
+import { useSession } from '@/lib/session';
 import { PageHeader } from '@/components/dashboard/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -53,6 +55,19 @@ const notificationSettings = [
 ];
 
 export default function SettingsPage() {
+  const { session } = useSession();
+  const [users, setUsers] = React.useState<BackendUser[]>([]);
+  const [usersLoading, setUsersLoading] = React.useState(false);
+
+  React.useEffect(() => {
+    if (session.role !== 'ADMIN') return;
+    setUsersLoading(true);
+    void getUsers(session.accessToken)
+      .then(setUsers)
+      .catch((error) => toast.error(error instanceof Error ? error.message : 'Unable to load users'))
+      .finally(() => setUsersLoading(false));
+  }, [session.accessToken, session.role]);
+
   return (
     <>
       <PageHeader
@@ -78,6 +93,12 @@ export default function SettingsPage() {
             <Palette className="h-3.5 w-3.5" />
             Appearance
           </TabsTrigger>
+          {session.role === 'ADMIN' && (
+            <TabsTrigger value="users" className="gap-1.5">
+              <Users className="h-3.5 w-3.5" />
+              Users
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="general" className="space-y-4">
@@ -240,6 +261,46 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {session.role === 'ADMIN' && (
+          <TabsContent value="users" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base font-semibold">Platform users</CardTitle>
+                <CardDescription>Users returned by the backend administration service.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {usersLoading ? (
+                  <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading users...
+                  </div>
+                ) : users.length === 0 ? (
+                  <div className="rounded-xl border border-dashed px-4 py-8 text-sm text-muted-foreground">No users returned.</div>
+                ) : (
+                  <div className="space-y-3">
+                    {users.map((user) => (
+                      <div key={user.id} className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-background/60 p-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                          <p className="truncate font-medium">{user.fullName || user.email}</p>
+                          <p className="truncate text-sm text-muted-foreground">{user.email}</p>
+                          <p className="truncate text-xs text-muted-foreground">{user.partyId?.split('::')[0] || 'No party assigned'}</p>
+                        </div>
+                        <div className="flex shrink-0 flex-wrap items-center gap-2">
+                          <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium">{user.role}</span>
+                          <span className="rounded-full border border-border px-2.5 py-1 text-xs font-medium">{user.approvalStatus}</span>
+                          <span className={user.isActive ? 'rounded-full bg-success/10 px-2.5 py-1 text-xs font-medium text-success' : 'rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground'}>
+                            {user.isActive ? 'Active' : 'Inactive'}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
       </Tabs>
     </>
   );
