@@ -53,6 +53,17 @@ const safeLoad = async (load: Promise<DashboardEvent[]>) => {
 
 const eventArgs = (event: DashboardEvent) => getDamlCreateArguments<Record<string, unknown>>(event as never);
 
+const displayDashboardParty = (value: string) => value.split('::')[0] || value;
+
+const displayWorkflowStatus = (value: string) => {
+  const knownStatuses: Record<string, string> = {
+    APPROVED_INVESTOR: 'Approved',
+    SUBSCRIPTION_OPEN: 'Subscription open',
+    VALIDATED_MANAGED_CONTRACT: 'Validated',
+  };
+  return knownStatuses[value] ?? value.replaceAll('_', ' ').toLowerCase().replace(/^\w/, (letter) => letter.toUpperCase());
+};
+
 async function loadDashboardData(token: string, role: AppRole): Promise<DashboardData> {
   const data = { ...emptyDashboardData };
   const load = (key: string, request: Promise<DashboardEvent[]>) => request.then((value) => { data[key] = value; });
@@ -264,9 +275,9 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      <div className="mt-6 grid items-stretch gap-4 lg:grid-cols-2">
-        <Card className="h-full w-full border-border/70">
-          <CardHeader className="space-y-4 border-b border-border/60">
+      <div className="mt-8 grid items-stretch gap-6 lg:grid-cols-2">
+        <Card className="h-full w-full overflow-hidden border-primary/15 bg-gradient-to-br from-primary/[0.035] via-background to-muted/20 shadow-sm">
+          <CardHeader className="space-y-5 border-b border-border/60 bg-gradient-to-br from-primary/[0.04] to-background">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="secondary" className="gap-1.5 rounded-full px-3 py-1">
                 {profile.badge}
@@ -284,7 +295,7 @@ export default function DashboardPage() {
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <CardTitle className="text-xl">{contractName}</CardTitle>
+                <CardTitle className="text-2xl tracking-tight">{contractName}</CardTitle>
                 <CardDescription>
                   {contractAddress} - {contractId}
                 </CardDescription>
@@ -292,50 +303,51 @@ export default function DashboardPage() {
               <StatusBadge status={contractStatus} />
             </div>
           </CardHeader>
-          <CardContent className="grid gap-4 pt-6 sm:grid-cols-3">
-            {highlights.map((item) => (
-              <div key={item.label} className="rounded-xl border border-border/60 bg-background/60 p-4">
-                <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
-                  <item.icon className="h-4 w-4" />
-                  {item.label}
+          <CardContent className="grid gap-3 pt-6 sm:grid-cols-3 sm:pt-7">
+          {highlights.map((item) => (
+              <div key={item.label} className="min-w-0 rounded-2xl border border-border/60 bg-background/70 p-4 transition-colors hover:border-primary/25 hover:bg-background">
+                <div className="flex min-w-0 items-start gap-2 text-xs uppercase tracking-wider text-muted-foreground">
+                  <item.icon className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span className="leading-4">{item.label}</span>
                 </div>
-                <p className="mt-2 text-lg font-semibold tracking-tight">{loading ? 'Loading...' : item.value}</p>
+                <p className="mt-3 text-2xl font-semibold tracking-tight tabular-nums">{loading ? 'Loading...' : item.value}</p>
               </div>
             ))}
           </CardContent>
         </Card>
 
-        <Card className="flex h-full w-full flex-col border-border/70">
-          <CardHeader>
-            <CardTitle className="text-base font-semibold">Role interface</CardTitle>
+        <Card className="flex h-full w-full flex-col border-primary/15 bg-gradient-to-br from-background via-background to-primary/[0.035] shadow-sm">
+          <CardHeader className="space-y-2">
+            <CardTitle className="text-xl tracking-tight">Role interface</CardTitle>
             <CardDescription>{profile.tagline}</CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-1 flex-col justify-center gap-3">
+          <CardContent className="flex flex-1 flex-col justify-center gap-3 pt-2 sm:pt-3">
             {actions.map((action) => (
               <Link
                 key={action.title}
                 href={action.href}
-                className="flex min-h-[72px] items-center gap-3 rounded-xl border border-border/60 p-3 transition-colors hover:bg-accent/50"
+                className="group flex min-h-[82px] items-center gap-4 rounded-2xl border border-border/60 bg-background/70 p-4 transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:bg-primary/[0.035] hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
               >
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
-                  <action.icon className="h-4 w-4 text-muted-foreground" />
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary transition-colors group-hover:bg-primary/15">
+                  <action.icon className="h-5 w-5" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h3 className="text-sm font-medium">{action.title}</h3>
-                  <p className="mt-1 text-sm text-muted-foreground">{action.description}</p>
+                  <h3 className="text-sm font-semibold">{action.title}</h3>
+                  <p className="mt-1 text-sm leading-5 text-muted-foreground">{action.description}</p>
                 </div>
+                <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
               </Link>
             ))}
           </CardContent>
         </Card>
       </div>
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <Card className="border-border/70">
+      <div className="mt-8 grid gap-6 lg:grid-cols-2">
+        <Card className="min-w-0 border-border/70 shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <div>
               <CardTitle className="text-base font-semibold">
-                {session.role === 'INVESTOR' ? 'My timeline' : 'Recent workflow events'}
+                {session.role === 'INVESTOR' ? 'My timeline' : 'Recent workflow activity'}
               </CardTitle>
               <CardDescription>
                 {session.role === 'INVESTOR'
@@ -355,13 +367,14 @@ export default function DashboardPage() {
               <p className="px-2 py-6 text-sm text-muted-foreground">No backend events available.</p>
             ) : timeline.map((item) => {
               const args = eventArgs(item);
-              const eventLabel = toStringValue(args.instrumentId ?? args.contractId ?? args.investor, 'Backend event');
-              const eventStatus = toStringValue(args.status, item.templateId?.split(':').pop() ?? 'Recorded');
+              const rawEventLabel = toStringValue(args.instrumentId ?? args.contractId ?? args.investor, 'Workflow event');
+              const eventLabel = args.investor ? displayDashboardParty(rawEventLabel) : rawEventLabel;
+              const eventStatus = displayWorkflowStatus(toStringValue(args.status, item.templateId?.split(':').pop() ?? 'Recorded'));
               const eventAmount = toNumber(args.amount ?? args.upfrontAmount ?? args.rewardAmount);
               return (
               <div
                 key={item.contractId}
-                className="flex items-center justify-between gap-4 rounded-lg px-2 py-2.5 transition-colors hover:bg-accent/50"
+                className="flex flex-col items-start justify-between gap-3 rounded-xl px-2 py-3 transition-colors hover:bg-accent/50 sm:flex-row sm:items-center"
               >
                 <div className="flex min-w-0 flex-1 items-center gap-3">
                   <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
@@ -378,7 +391,7 @@ export default function DashboardPage() {
                     </span>
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex max-w-full flex-wrap items-center gap-3 sm:justify-end">
                   <StatusBadge status={eventStatus} />
                   {eventAmount > 0 && <span className="text-sm text-muted-foreground">{formatCurrency(eventAmount)}</span>}
                 </div>
@@ -388,21 +401,21 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card className="border-border/70">
+        <Card className="min-w-0 border-border/70 shadow-sm">
           <CardHeader>
             <CardTitle className="text-base font-semibold">Project snapshot</CardTitle>
-            <CardDescription>Common values for the managed property POC.</CardDescription>
+            <CardDescription>Key information about the managed property project.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="rounded-xl border border-border/60 bg-background/60 p-4">
+            <div className="rounded-2xl border border-border/60 bg-background/70 p-4 transition-colors hover:border-primary/25">
               <p className="text-xs uppercase tracking-wider text-muted-foreground">Contract</p>
               <p className="mt-2 break-all text-sm font-medium">{contractId}</p>
             </div>
-            <div className="rounded-xl border border-border/60 bg-background/60 p-4">
-              <p className="text-xs uppercase tracking-wider text-muted-foreground">Financial period</p>
+            <div className="rounded-2xl border border-border/60 bg-background/70 p-4 transition-colors hover:border-primary/25">
+              <p className="text-xs uppercase tracking-wider text-muted-foreground">Activity</p>
               <p className="mt-2 text-sm font-medium">{data.reports.length + data.settlements.length} recorded events</p>
             </div>
-            <div className="rounded-xl border border-border/60 bg-background/60 p-4">
+            <div className="rounded-2xl border border-border/60 bg-background/70 p-4 transition-colors hover:border-primary/25">
               <p className="text-xs uppercase tracking-wider text-muted-foreground">Expected investor settlement</p>
               <p className="mt-2 text-sm font-medium">{formatCurrency(rewardTotal)}</p>
             </div>

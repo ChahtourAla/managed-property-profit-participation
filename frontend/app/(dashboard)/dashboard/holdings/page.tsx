@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -68,6 +69,14 @@ function mapHolding(event: { contractId: string; createArguments?: Record<string
   };
 }
 
+function displayPartyName(partyId: string) {
+  return partyId.split('::')[0] || 'Visible holder';
+}
+
+function shortenReference(value: string) {
+  return value.length > 18 ? `${value.slice(0, 18)}...` : value;
+}
+
 function dedupeHoldings(items: HoldingRecord[]) {
   const byCid = new Map<string, HoldingRecord>();
 
@@ -89,6 +98,7 @@ export default function HoldingsPage() {
   const [instrumentId, setInstrumentId] = React.useState('INSTR-MPC-001');
   const [holder, setHolder] = React.useState(session.partyId);
   const [holdingCid, setHoldingCid] = React.useState('');
+  const [holderFilter, setHolderFilter] = React.useState('all');
   const [loading, setLoading] = React.useState(true);
   const [refreshing, setRefreshing] = React.useState(false);
   const [burnReferencePrefix, setBurnReferencePrefix] = React.useState('BURN-INSTR-MPC-001');
@@ -212,7 +222,11 @@ export default function HoldingsPage() {
     ...holderHoldings,
     ...(cidHolding ? [cidHolding] : []),
   ]);
-  const totalUnits = tableRows.reduce((sum, item) => sum + item.amount, 0);
+  const holderOptions = Array.from(new Set(tableRows.map((item) => item.holder).filter(Boolean)));
+  const visibleRows = holderFilter === 'all'
+    ? tableRows
+    : tableRows.filter((item) => item.holder === holderFilter);
+  const totalUnits = visibleRows.reduce((sum, item) => sum + item.amount, 0);
 
   return (
     <>
@@ -260,36 +274,54 @@ export default function HoldingsPage() {
         </CardContent>
       </Card>
 
-      <Card className="mt-6 border-border/70">
-        <CardHeader>
-          <CardTitle className="text-base font-semibold">Active holdings</CardTitle>
-          <CardDescription>Data from `GET /holdings`, `/holdings/instrument/:instrumentId`, `/holdings/party/:holder`, and `/holdings/cid/:holdingCid`.</CardDescription>
+      <Card className="mt-6 border-border/70 shadow-sm">
+        <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between sm:space-y-0">
+          <div className="space-y-2">
+            <CardTitle className="text-lg">Active holdings</CardTitle>
+            <CardDescription>Review the units currently held by each participant.</CardDescription>
+          </div>
+          <div className="w-full sm:w-56">
+            <Label htmlFor="holder-filter" className="text-xs text-muted-foreground">Filter by holder</Label>
+            <Select value={holderFilter} onValueChange={setHolderFilter}>
+              <SelectTrigger id="holder-filter" className="mt-1 rounded-xl">
+                <SelectValue placeholder="All holders" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All holders</SelectItem>
+                {holderOptions.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {displayPartyName(option)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </CardHeader>
         <CardContent>
-          {tableRows.length === 0 ? (
+          {visibleRows.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border/70 px-4 py-10 text-sm text-muted-foreground">
               No active holding is visible for this role and filter.
             </div>
           ) : (
-            <div className="overflow-hidden rounded-xl border border-border/70">
-              <Table>
+            <div className="overflow-x-auto rounded-xl border border-border/70">
+              <Table className="min-w-[720px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Holder</TableHead>
                     <TableHead>Instrument</TableHead>
-                    <TableHead className="text-right">Amount / units</TableHead>
+                    <TableHead className="text-right">Units</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>Daml holdingCid</TableHead>
+                    <TableHead>Record reference</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {tableRows.map((item) => (
-                    <TableRow key={item.holdingCid}>
-                      <TableCell className="max-w-[260px] truncate font-medium">{item.holder || 'Visible holder'}</TableCell>
-                      <TableCell>{item.instrumentId}</TableCell>
-                      <TableCell className="text-right font-medium">{item.amount}</TableCell>
+                  {visibleRows.map((item) => (
+                    <TableRow key={item.holdingCid} className="transition-colors hover:bg-muted/30">
+                      <TableCell className="font-medium">{displayPartyName(item.holder)}</TableCell>
+                      <TableCell className="font-medium">{item.instrumentId}</TableCell>
+                      <TableCell className="text-right font-semibold tabular-nums">{item.amount}</TableCell>
                       <TableCell><StatusBadge status={item.status} /></TableCell>
-                      <TableCell className="max-w-[320px] truncate text-xs text-muted-foreground">{item.holdingCid}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground" title={item.holdingCid}>{shortenReference(item.holdingCid)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
