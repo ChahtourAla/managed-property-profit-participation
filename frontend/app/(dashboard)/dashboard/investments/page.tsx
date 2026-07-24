@@ -6,6 +6,7 @@ import { ArrowLeft, ArrowRight, Building2, Check, CheckCircle2, Coins, Copy, Loa
 import { investments, type Investment } from '@/lib/mock-investments';
 import { formatCurrency, formatDate } from '@/lib/format';
 import { useSession } from '@/lib/session';
+import { getProperties } from '@/lib/backend-api';
 import {
   approveInvestor,
   confirmFunding,
@@ -120,8 +121,6 @@ const sampleInvestors = [
   },
 ] as const;
 
-const staticPropertyName = 'Managed Apartment Casablanca';
-
 function nextInstrumentId(values: string[]) {
   const max = values.reduce((currentMax, value) => {
     const match = value.match(/^INSTR-MPC-(\d+)$/i);
@@ -167,10 +166,11 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
     setLoading(true);
     setError(null);
     try {
-      const [investorResponse, validatedResponse, instrumentResponse] = await Promise.all([
+      const [investorResponse, validatedResponse, instrumentResponse, propertyResponse] = await Promise.all([
         getApprovedInvestors(token),
         getValidatedContracts(token),
         getInstruments(token),
+        getProperties(token),
       ]);
 
       const normalizedApproved = investorResponse.map((event) => {
@@ -198,6 +198,11 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
         };
       }).filter((item) => item.contractId);
 
+      const propertyNameById = new Map([
+        ...normalizedValidated.map((item) => [item.propertyId, item.propertyName] as const),
+        ...propertyResponse.map((property) => [property.propertyId, property.name] as const),
+      ]);
+
       const normalizedInstruments = instrumentResponse.map((event) => {
         const args = getDamlCreateArguments<{
           contractId?: unknown;
@@ -212,11 +217,13 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
           status?: unknown;
         }>({ contractId: String(event.contractId), createArguments: event.createArguments });
 
+        const propertyId = toStringValue(args.propertyId, '');
+
         return {
           contractId: String(event.contractId),
           contractBusinessId: toStringValue(args.contractId, ''),
-          propertyId: toStringValue(args.propertyId, ''),
-          propertyName: staticPropertyName,
+          propertyId,
+          propertyName: propertyNameById.get(propertyId) ?? 'Property name unavailable',
           instrumentId: toStringValue(args.instrumentId, ''),
           totalUnits: toNumber(args.totalUnits),
           ownerRetainedUnits: toNumber(args.ownerRetainedUnits),
