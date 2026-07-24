@@ -3,15 +3,14 @@
 import * as React from 'react';
 import Link from 'next/link';
 import {
+  ArrowLeft,
   ArrowRight,
-  Building2,
   CalendarDays,
   CheckCircle2,
   ClipboardList,
   Loader2,
   RefreshCw,
   ShieldCheck,
-  Sparkles,
 } from 'lucide-react';
 
 import { useSession } from '@/lib/session';
@@ -30,9 +29,11 @@ import { StatusBadge } from '@/components/dashboard/status-badge';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -58,7 +59,7 @@ type DraftRecord = {
   expectedUpfrontFunding: number;
   currency: string;
   status: 'Draft' | 'Validated';
-  rawContractId: string;
+  createdAt: string;
 };
 
 type EasycoinDraftReviewProps = {
@@ -82,8 +83,8 @@ type DraftFormState = {
 };
 
 const initialFormState: DraftFormState = {
-  contractId: 'MPC-001',
-  propertyId: 'PROP-001',
+  contractId: '',
+  propertyId: '',
   propertyName: 'Managed Apartment Casablanca',
   financialPeriod: '2026',
   expectedRentalIncome: '120000',
@@ -96,6 +97,15 @@ const initialFormState: DraftFormState = {
   expectedUpfrontFunding: '34000',
   currency: 'MAD',
 };
+
+function nextSequenceId(prefix: string, values: string[]) {
+  const max = values.reduce((currentMax, value) => {
+    const match = value.match(new RegExp(`^${prefix}-(\\d+)$`, 'i'));
+    return match ? Math.max(currentMax, Number(match[1])) : currentMax;
+  }, 0);
+
+  return `${prefix}-${String(max + 1).padStart(3, '0')}`;
+}
 
 const workflowSteps = [
   {
@@ -150,7 +160,7 @@ function normalizeDraftRecord(event: unknown, status: DraftRecord['status']): Dr
     expectedUpfrontFunding: toNumber(String(terms.expectedUpfrontFunding ?? 0)),
     currency: String(terms.currency ?? 'MAD'),
     status,
-    rawContractId: String(raw.contractId ?? contractId),
+    createdAt: String(raw.createdAt ?? ''),
   };
 }
 
@@ -180,7 +190,7 @@ function DraftTable({
           </Badge>
         </div>
       </CardHeader>
-      <CardContent className="p-0">
+      <CardContent className="overflow-x-auto p-0">
         {rows.length === 0 ? (
           <div className="px-6 py-10 text-sm text-muted-foreground">{emptyLabel}</div>
         ) : (
@@ -199,10 +209,7 @@ function DraftTable({
               {rows.map((row) => (
                 <TableRow key={`${row.status}-${row.contractId}`}>
                   <TableCell className="font-medium">
-                    <div className="flex flex-col gap-1">
-                      <span>{row.contractId}</span>
-                      <span className="text-xs text-muted-foreground">{row.rawContractId}</span>
-                    </div>
+                    <span>{row.contractId}</span>
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-col gap-1">
@@ -233,6 +240,15 @@ function EasycoinDraftReview({ token }: EasycoinDraftReviewProps) {
   const [refreshing, setRefreshing] = React.useState(false);
   const [pendingAction, setPendingAction] = React.useState<string | null>(null);
   const [rejectReasons, setRejectReasons] = React.useState<Record<string, string>>({});
+  const [selectedDraft, setSelectedDraft] = React.useState<DraftRecord | null>(null);
+  const [draftPage, setDraftPage] = React.useState(1);
+  const draftsPerPage = 3;
+  const draftPageCount = Math.max(1, Math.ceil(drafts.length / draftsPerPage));
+  const visibleDrafts = drafts.slice((draftPage - 1) * draftsPerPage, draftPage * draftsPerPage);
+
+  React.useEffect(() => {
+    setDraftPage((current) => Math.min(current, draftPageCount));
+  }, [draftPageCount]);
 
   const loadData = React.useCallback(async () => {
     setLoading(true);
@@ -242,17 +258,16 @@ function EasycoinDraftReview({ token }: EasycoinDraftReviewProps) {
         getValidatedContracts(token),
       ]);
 
-      setDrafts(
-        draftResponse
-          .map((event) => normalizeDraftRecord(event, 'Draft'))
-          .filter(Boolean) as DraftRecord[]
-      );
+      const nextDrafts = draftResponse
+        .map((event) => normalizeDraftRecord(event, 'Draft'))
+        .filter(Boolean) as DraftRecord[];
+      const nextValidatedContracts = validatedResponse
+        .map((event) => normalizeDraftRecord(event, 'Validated'))
+        .filter(Boolean) as DraftRecord[];
 
-      setValidatedContracts(
-        validatedResponse
-          .map((event) => normalizeDraftRecord(event, 'Validated'))
-          .filter(Boolean) as DraftRecord[]
-      );
+      setDrafts(nextDrafts);
+      setValidatedContracts(nextValidatedContracts);
+
     } finally {
       setLoading(false);
     }
@@ -307,10 +322,10 @@ function EasycoinDraftReview({ token }: EasycoinDraftReviewProps) {
   return (
     <>
       <PageHeader
-        title="Easycoin draft review"
-        description="Review owner submissions, validate correct contracts, and reject drafts that need correction."
+        title="Review submitted drafts"
+        description="Check each property submission, then approve it or send it back for correction."
       >
-        <Button variant="outline" size="sm" className="gap-2" onClick={refresh} disabled={refreshing}>
+        <Button variant="outline" size="sm" className="gap-2 rounded-xl" onClick={refresh} disabled={refreshing}>
           {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           Refresh
         </Button>
@@ -353,13 +368,15 @@ function EasycoinDraftReview({ token }: EasycoinDraftReviewProps) {
         </Card>
       </div>
 
-      <div className="mt-6 grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
-        <Card className="border-border/70">
-          <CardHeader className="space-y-2 border-b border-border/60">
-            <CardTitle className="text-lg">Draft queue</CardTitle>
-            <CardDescription>Validate the correct business case, or reject it with a reason.</CardDescription>
+      <div className="mt-8 grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+        <Card className="min-w-0 overflow-hidden border-primary/15 shadow-sm">
+          <CardHeader className="space-y-2 border-b border-border/60 bg-gradient-to-br from-primary/[0.04] to-background">
+            <div className="space-y-1">
+              <CardTitle className="text-lg">Draft queue</CardTitle>
+              <CardDescription>Review each submission and choose an action.</CardDescription>
+            </div>
           </CardHeader>
-          <CardContent className="space-y-4 pt-6">
+          <CardContent className="space-y-4 !pt-8 sm:!pt-9">
             {loading ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -370,10 +387,25 @@ function EasycoinDraftReview({ token }: EasycoinDraftReviewProps) {
                 No draft awaiting review.
               </div>
             ) : (
-              drafts.map((draft) => (
-                <div key={draft.contractId} className="rounded-2xl border border-border/60 p-4">
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                    <div className="space-y-3">
+              visibleDrafts.map((draft) => (
+                <div
+                  key={draft.contractId}
+                  role="button"
+                  tabIndex={0}
+                  onClick={(event) => {
+                    if ((event.target as HTMLElement).closest('button, input')) return;
+                    setSelectedDraft(draft);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      setSelectedDraft(draft);
+                    }
+                  }}
+                  className="min-w-0 cursor-pointer rounded-2xl border border-border/60 bg-gradient-to-br from-primary/[0.025] via-background to-muted/30 p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <div className="relative">
+                    <div className="w-full min-w-0 space-y-3">
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="secondary" className="rounded-full px-3 py-1">
                           {draft.contractId}
@@ -381,29 +413,29 @@ function EasycoinDraftReview({ token }: EasycoinDraftReviewProps) {
                         <StatusBadge status={draft.status} />
                       </div>
                       <div>
-                        <h3 className="text-base font-semibold">{draft.propertyName}</h3>
+                        <h3 className="text-lg font-semibold tracking-tight">{draft.propertyName}</h3>
                         <p className="text-sm text-muted-foreground">
                           {draft.propertyId} • {draft.financialPeriod} • {draft.reportFrequency}
                         </p>
                       </div>
-                      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                        <div className="rounded-xl border border-border/60 bg-background/60 p-3 text-sm">
+                      <div className="grid min-w-0 gap-2 sm:grid-cols-3">
+                        <div className="min-w-0 overflow-hidden rounded-xl border border-border/60 bg-background/70 p-3 text-sm">
                           <p className="text-xs uppercase tracking-wider text-muted-foreground">Income</p>
-                          <p className="mt-1 font-medium">{formatCurrency(draft.expectedRentalIncome)}</p>
+                          <p className="mt-1 break-words text-sm font-semibold leading-5 tabular-nums sm:text-base">{formatCurrency(draft.expectedRentalIncome)}</p>
                         </div>
-                        <div className="rounded-xl border border-border/60 bg-background/60 p-3 text-sm">
+                        <div className="min-w-0 overflow-hidden rounded-xl border border-border/60 bg-background/70 p-3 text-sm">
                           <p className="text-xs uppercase tracking-wider text-muted-foreground">Expenses</p>
-                          <p className="mt-1 font-medium">{formatCurrency(draft.expectedExpenses)}</p>
+                          <p className="mt-1 break-words text-sm font-semibold leading-5 tabular-nums sm:text-base">{formatCurrency(draft.expectedExpenses)}</p>
                         </div>
-                        <div className="rounded-xl border border-border/60 bg-background/60 p-3 text-sm">
+                        <div className="min-w-0 overflow-hidden rounded-xl border border-border/60 bg-background/70 p-3 text-sm">
                           <p className="text-xs uppercase tracking-wider text-muted-foreground">Upfront funding</p>
-                          <p className="mt-1 font-medium">{formatCurrency(draft.expectedUpfrontFunding)}</p>
+                          <p className="mt-1 break-words text-sm font-semibold leading-5 tabular-nums sm:text-base">{formatCurrency(draft.expectedUpfrontFunding)}</p>
                         </div>
                       </div>
                     </div>
-                    <div className="flex flex-col gap-2 lg:w-48">
+                    <div className="mt-4 flex w-full shrink-0 flex-col gap-2 sm:w-48 lg:absolute lg:right-0 lg:top-0 lg:mt-0">
                       <Button
-                        className="gap-2"
+                        className="h-11 gap-2 rounded-xl shadow-sm"
                         onClick={() => handleValidate(draft.contractId)}
                         disabled={pendingAction === draft.contractId}
                       >
@@ -412,16 +444,19 @@ function EasycoinDraftReview({ token }: EasycoinDraftReviewProps) {
                         ) : (
                           <CheckCircle2 className="h-4 w-4" />
                         )}
-                        Validate
+                        Validate draft
                       </Button>
                     </div>
                   </div>
-                  <div className="mt-4 space-y-2">
-                    <Label htmlFor={`reject-${draft.contractId}`}>Reject reason</Label>
+                  <div className="mt-4 space-y-2 rounded-xl border border-border/60 bg-muted/20 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <Label htmlFor={`reject-${draft.contractId}`}>Request a correction</Label>
+                      <span className="text-xs text-muted-foreground">Optional reason</span>
+                    </div>
                     <div className="flex flex-col gap-2 sm:flex-row">
                       <Input
                         id={`reject-${draft.contractId}`}
-                        placeholder="The submitted contract data is incomplete."
+                        placeholder="Explain what needs to be corrected..."
                         value={rejectReasons[draft.contractId] ?? ''}
                         onChange={(e) =>
                           setRejectReasons((current) => ({
@@ -432,7 +467,7 @@ function EasycoinDraftReview({ token }: EasycoinDraftReviewProps) {
                       />
                       <Button
                         variant="outline"
-                        className="gap-2"
+                        className="gap-2 rounded-xl"
                         onClick={() => handleReject(draft.contractId)}
                         disabled={pendingAction === draft.contractId}
                       >
@@ -448,13 +483,44 @@ function EasycoinDraftReview({ token }: EasycoinDraftReviewProps) {
                 </div>
               ))
             )}
+            {drafts.length > draftsPerPage && (
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-4">
+                <p className="text-xs text-muted-foreground">
+                  Page {draftPage} of {draftPageCount}
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1 rounded-xl"
+                    onClick={() => setDraftPage((current) => Math.max(1, current - 1))}
+                    disabled={draftPage === 1}
+                  >
+                    <ArrowLeft className="h-3.5 w-3.5" />
+                    Previous
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1 rounded-xl"
+                    onClick={() => setDraftPage((current) => Math.min(draftPageCount, current + 1))}
+                    disabled={draftPage === draftPageCount}
+                  >
+                    Next
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
 
-        <Card className="border-border/70">
-          <CardHeader>
+        <Card className="min-w-0 border-border/70 shadow-sm">
+          <CardHeader className="space-y-2">
             <CardTitle className="text-base font-semibold">Validated contracts</CardTitle>
-            <CardDescription>Ready to use for investor approval and token creation.</CardDescription>
+            <CardDescription>Ready for investor approval and instrument creation.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {validatedContracts.length === 0 ? (
@@ -489,6 +555,86 @@ function EasycoinDraftReview({ token }: EasycoinDraftReviewProps) {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog
+        open={Boolean(selectedDraft)}
+        onOpenChange={(open) => {
+          if (!open) setSelectedDraft(null);
+        }}
+      >
+        <DialogContent className="max-w-2xl">
+          {selectedDraft && (
+            <>
+              <DialogHeader>
+                <DialogTitle>{selectedDraft.propertyName}</DialogTitle>
+                <DialogDescription>Review the complete submission before taking action.</DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border border-border/60 bg-muted/30 p-4 sm:col-span-2">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Contract</p>
+                  <p className="mt-1 font-semibold">{selectedDraft.contractId}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">Property ID: {selectedDraft.propertyId}</p>
+                </div>
+                <div className="rounded-xl border border-border/60 bg-muted/30 p-4">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Period</p>
+                  <p className="mt-1 font-medium">{selectedDraft.financialPeriod}</p>
+                </div>
+                <div className="rounded-xl border border-border/60 bg-muted/30 p-4">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Report frequency</p>
+                  <p className="mt-1 font-medium">{selectedDraft.reportFrequency}</p>
+                </div>
+                <div className="rounded-xl border border-border/60 bg-muted/30 p-4">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Expected income</p>
+                  <p className="mt-1 font-medium">{formatCurrency(selectedDraft.expectedRentalIncome)}</p>
+                </div>
+                <div className="rounded-xl border border-border/60 bg-muted/30 p-4">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Expected expenses</p>
+                  <p className="mt-1 font-medium">{formatCurrency(selectedDraft.expectedExpenses)}</p>
+                </div>
+                <div className="rounded-xl border border-border/60 bg-muted/30 p-4">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Upfront funding</p>
+                  <p className="mt-1 font-medium">{formatCurrency(selectedDraft.expectedUpfrontFunding)}</p>
+                </div>
+                <div className="rounded-xl border border-border/60 bg-muted/30 p-4">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Investor settlement</p>
+                  <p className="mt-1 font-medium">{formatCurrency(selectedDraft.expectedInvestorSettlement)}</p>
+                </div>
+                <div className="rounded-xl border border-border/60 bg-muted/30 p-4">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Currency</p>
+                  <p className="mt-1 font-medium">{selectedDraft.currency}</p>
+                </div>
+                <div className="rounded-xl border border-border/60 bg-muted/30 p-4">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Easycoin fee</p>
+                  <p className="mt-1 font-medium">{selectedDraft.easycoinFeeRate}%</p>
+                </div>
+                <div className="rounded-xl border border-border/60 bg-muted/30 p-4">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Owner shares</p>
+                  <p className="mt-1 font-medium">Offered {selectedDraft.ownerProfitShareOffered}% · Retained {selectedDraft.ownerRetainedShare}%</p>
+                </div>
+              </div>
+              <div className="flex flex-col gap-2 border-t border-border/60 pt-4 sm:flex-row sm:justify-end">
+                <Button
+                  variant="outline"
+                  className="gap-2"
+                  onClick={() => handleReject(selectedDraft.contractId)}
+                  disabled={pendingAction === selectedDraft.contractId}
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  Reject draft
+                </Button>
+                <Button
+                  className="gap-2"
+                  onClick={() => handleValidate(selectedDraft.contractId)}
+                  disabled={pendingAction === selectedDraft.contractId}
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                  Validate draft
+                </Button>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
@@ -625,6 +771,13 @@ export default function PropertiesPage() {
   const [saving, setSaving] = React.useState(false);
   const [refreshing, setRefreshing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [ownerIdCopied, setOwnerIdCopied] = React.useState(false);
+
+  const handleCopyOwnerId = async () => {
+    await navigator.clipboard.writeText(session.partyId);
+    setOwnerIdCopied(true);
+    window.setTimeout(() => setOwnerIdCopied(false), 1600);
+  };
 
   const loadOwnerData = React.useCallback(async () => {
     if (!session.accessToken) return;
@@ -638,17 +791,22 @@ export default function PropertiesPage() {
         getValidatedContracts(session.accessToken),
       ]);
 
-      setDrafts(
-        draftResponse
-          .map((event) => normalizeDraftRecord(event, 'Draft'))
-          .filter(Boolean) as DraftRecord[]
-      );
+      const nextDrafts = draftResponse
+        .map((event) => normalizeDraftRecord(event, 'Draft'))
+        .filter(Boolean) as DraftRecord[];
+      const nextValidatedContracts = validatedResponse
+        .map((event) => normalizeDraftRecord(event, 'Validated'))
+        .filter(Boolean) as DraftRecord[];
 
-      setValidatedContracts(
-        validatedResponse
-          .map((event) => normalizeDraftRecord(event, 'Validated'))
-          .filter(Boolean) as DraftRecord[]
-      );
+      setDrafts(nextDrafts);
+      setValidatedContracts(nextValidatedContracts);
+
+      const existingRecords = [...nextDrafts, ...nextValidatedContracts];
+      setForm((current) => ({
+        ...current,
+        contractId: nextSequenceId('MPC', existingRecords.map((item) => item.contractId)),
+        propertyId: nextSequenceId('PROP', existingRecords.map((item) => item.propertyId)),
+      }));
     } catch (loadError) {
       const message =
         loadError instanceof Error ? loadError.message : 'Unable to load owner data';
@@ -711,7 +869,11 @@ export default function PropertiesPage() {
   const validatedCount = validatedContracts.length;
   const totalTargetFunding = drafts.reduce((sum, item) => sum + item.expectedUpfrontFunding, 0);
   const totalInvestorSettlement = drafts.reduce((sum, item) => sum + item.expectedInvestorSettlement, 0);
-  const latestDraft = drafts[0] ?? validatedContracts[0];
+  const latestDraft = [...drafts, ...validatedContracts].sort((a, b) => {
+    const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+    const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+    return dateB - dateA;
+  })[0];
 
   if (!ready) {
     return (
@@ -817,35 +979,25 @@ export default function PropertiesPage() {
               <Badge variant="secondary" className="rounded-full px-3 py-1">
                 Managed contract draft
               </Badge>
-              <Badge variant="outline" className="rounded-full px-3 py-1">
-                Owner: {session.partyId}
-              </Badge>
+              <button
+                type="button"
+                onClick={handleCopyOwnerId}
+                className="inline-flex items-center rounded-full border border-border bg-background px-3 py-1 text-xs font-medium uppercase tracking-wider transition-colors hover:bg-accent"
+                title="Copy full owner party ID"
+                aria-label="Copy full owner party ID"
+              >
+                {ownerIdCopied ? 'Copied' : 'OWNER'}
+              </button>
             </div>
             <div>
               <CardTitle className="text-xl">Create a new draft</CardTitle>
               <CardDescription>
-                Use business IDs and financial terms. The backend takes the owner party from your JWT.
+                Enter the property details and financial terms for your managed contract.
               </CardDescription>
             </div>
           </CardHeader>
           <form onSubmit={handleCreateDraft}>
             <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="contractId">Contract ID</Label>
-                <Input
-                  id="contractId"
-                  value={form.contractId}
-                  onChange={(e) => setForm((current) => ({ ...current, contractId: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="propertyId">Property ID</Label>
-                <Input
-                  id="propertyId"
-                  value={form.propertyId}
-                  onChange={(e) => setForm((current) => ({ ...current, propertyId: e.target.value }))}
-                />
-              </div>
               <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="propertyName">Property name</Label>
                 <Input
@@ -864,11 +1016,19 @@ export default function PropertiesPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="reportFrequency">Report frequency</Label>
-                <Input
-                  id="reportFrequency"
+                <Select
                   value={form.reportFrequency}
-                  onChange={(e) => setForm((current) => ({ ...current, reportFrequency: e.target.value }))}
-                />
+                  onValueChange={(value) => setForm((current) => ({ ...current, reportFrequency: value }))}
+                >
+                  <SelectTrigger id="reportFrequency">
+                    <SelectValue placeholder="Select frequency" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="MONTHLY">Monthly</SelectItem>
+                    <SelectItem value="QUARTERLY">Quarterly</SelectItem>
+                    <SelectItem value="YEARLY">Yearly</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="currency">Currency</Label>
@@ -966,10 +1126,10 @@ export default function PropertiesPage() {
             </CardContent>
             <div className="flex flex-col gap-3 border-t border-border/60 px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm text-muted-foreground">
-                The backend ignores legacy party fields and uses your authenticated owner identity.
+                Review the details above, then submit your draft for Easycoin review.
               </p>
               <Button type="submit" className="gap-2" disabled={saving}>
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                {saving && <Loader2 className="h-4 w-4 animate-spin" />}
                 {saving ? 'Creating draft...' : 'Submit draft'}
               </Button>
             </div>

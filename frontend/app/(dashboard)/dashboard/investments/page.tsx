@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { CheckCircle2, Coins, Loader2, PlusCircle, RefreshCw, ShieldCheck, Users } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Building2, Check, CheckCircle2, Coins, Copy, Loader2, PlusCircle, RefreshCw, ShieldCheck, UserRound, Users } from 'lucide-react';
 
 import { investments, type Investment } from '@/lib/mock-investments';
 import { formatCurrency, formatDate } from '@/lib/format';
@@ -36,6 +36,7 @@ import { DataTable, type Column } from '@/components/dashboard/data-table';
 import { StatusBadge } from '@/components/dashboard/status-badge';
 import { EmptyState } from '@/components/dashboard/empty-state';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -81,11 +82,17 @@ function groupApprovedInvestors(records: ApprovedInvestorRecord[]): ApprovedInve
 
 type InstrumentRecord = {
   contractId: string;
+  contractBusinessId?: string;
+  propertyId?: string;
+  propertyName?: string;
   instrumentId: string;
   totalUnits: number;
+  ownerRetainedUnits?: number;
+  investorOfferedUnits?: number;
   nominalValuePerUnit: number;
   investorUpfrontPricePerUnit: number;
   approvedInvestors: string[];
+  status?: string;
 };
 
 type ValidatedContractRecord = {
@@ -113,17 +120,40 @@ const sampleInvestors = [
   },
 ] as const;
 
+const staticPropertyName = 'Managed Apartment Casablanca';
+
+function nextInstrumentId(values: string[]) {
+  const max = values.reduce((currentMax, value) => {
+    const match = value.match(/^INSTR-MPC-(\d+)$/i);
+    return match ? Math.max(currentMax, Number(match[1])) : currentMax;
+  }, 0);
+
+  return `INSTR-MPC-${String(max + 1).padStart(3, '0')}`;
+}
+
+function nextApprovalReference(records: ApprovedInvestorRecord[]) {
+  const max = records.reduce((currentMax, record) => {
+    const match = record.approvalReference.match(/^KYC-APPROVAL-(\d+)$/i);
+    return match ? Math.max(currentMax, Number(match[1])) : currentMax;
+  }, 0);
+
+  return `KYC-APPROVAL-${String(max + 1).padStart(3, '0')}`;
+}
+
 function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
   const [approvedInvestors, setApprovedInvestors] = React.useState<ApprovedInvestorRecord[]>([]);
   const [validatedContracts, setValidatedContracts] = React.useState<ValidatedContractRecord[]>([]);
   const [instruments, setInstruments] = React.useState<InstrumentRecord[]>([]);
   const [selectedContractId, setSelectedContractId] = React.useState('');
   const [selectedApprovedInvestors, setSelectedApprovedInvestors] = React.useState<string[]>([]);
+  const [selectedInstrument, setSelectedInstrument] = React.useState<InstrumentRecord | null>(null);
+  const [instrumentDetailsLoading, setInstrumentDetailsLoading] = React.useState(false);
+  const [instrumentPage, setInstrumentPage] = React.useState(1);
+  const [copiedInvestorId, setCopiedInvestorId] = React.useState<string | null>(null);
   const [approvalInvestor, setApprovalInvestor] = React.useState(sampleInvestors[0].partyId);
-  const [approvalReference, setApprovalReference] = React.useState('KYC-APPROVAL-001');
   const [instrumentForm, setInstrumentForm] = React.useState({
     contractId: '',
-    instrumentId: 'INSTR-MPC-001',
+    instrumentId: '',
     totalUnits: '1000',
     nominalValuePerUnit: '76.8',
     investorUpfrontPricePerUnit: '68',
@@ -155,10 +185,11 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
       }).filter((item) => item.investor);
 
       const normalizedValidated = validatedResponse.map((event) => {
-        const contractData = getDamlCreateArguments<{ contractData?: Record<string, unknown> }>({
+        const validatedArguments = getDamlCreateArguments<Record<string, unknown> & { contractData?: Record<string, unknown> }>({
           contractId: String(event.contractId),
           createArguments: event.createArguments,
-        }).contractData ?? {};
+        });
+        const contractData: Record<string, unknown> = validatedArguments.contractData ?? validatedArguments;
         return {
           contractId: String(event.contractId),
           businessContractId: toStringValue(contractData.contractId, ''),
@@ -169,28 +200,43 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
 
       const normalizedInstruments = instrumentResponse.map((event) => {
         const args = getDamlCreateArguments<{
+          contractId?: unknown;
+          propertyId?: unknown;
           instrumentId?: unknown;
           totalUnits?: unknown;
+          ownerRetainedUnits?: unknown;
+          investorOfferedUnits?: unknown;
           nominalValuePerUnit?: unknown;
           investorUpfrontPricePerUnit?: unknown;
           approvedInvestors?: unknown;
+          status?: unknown;
         }>({ contractId: String(event.contractId), createArguments: event.createArguments });
 
         return {
           contractId: String(event.contractId),
+          contractBusinessId: toStringValue(args.contractId, ''),
+          propertyId: toStringValue(args.propertyId, ''),
+          propertyName: staticPropertyName,
           instrumentId: toStringValue(args.instrumentId, ''),
           totalUnits: toNumber(args.totalUnits),
+          ownerRetainedUnits: toNumber(args.ownerRetainedUnits),
+          investorOfferedUnits: toNumber(args.investorOfferedUnits),
           nominalValuePerUnit: toNumber(args.nominalValuePerUnit),
           investorUpfrontPricePerUnit: toNumber(args.investorUpfrontPricePerUnit),
           approvedInvestors: Array.isArray(args.approvedInvestors)
             ? (args.approvedInvestors as unknown[]).map((item) => String(item))
             : [],
+          status: toStringValue(args.status, 'SUBSCRIPTION_OPEN'),
         };
       }).filter((item) => item.instrumentId);
 
       setApprovedInvestors(normalizedApproved as ApprovedInvestorRecord[]);
       setValidatedContracts(normalizedValidated as ValidatedContractRecord[]);
       setInstruments(normalizedInstruments as InstrumentRecord[]);
+      setInstrumentForm((current) => ({
+        ...current,
+        instrumentId: nextInstrumentId(normalizedInstruments.map((item) => item.instrumentId)),
+      }));
 
       if (!selectedContractId && normalizedValidated[0]) {
         setSelectedContractId(normalizedValidated[0].businessContractId);
@@ -226,6 +272,7 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
     e.preventDefault();
     setSaving(true);
     try {
+      const approvalReference = nextApprovalReference(approvedInvestors);
       await approveInvestor(token, {
         investor: approvalInvestor,
         approvalReference,
@@ -266,6 +313,69 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
 
   const approvedInvestorOptions = groupApprovedInvestors(approvedInvestors);
 
+  const getInvestorName = (partyId: string) =>
+    partyId.split('::')[0] || 'Investor';
+
+  const copyInvestorId = async (partyId: string) => {
+    await navigator.clipboard.writeText(partyId);
+    setCopiedInvestorId(partyId);
+    window.setTimeout(() => setCopiedInvestorId(null), 1600);
+  };
+  const instrumentsPerPage = 4;
+  const instrumentPageCount = Math.max(1, Math.ceil(instruments.length / instrumentsPerPage));
+  const visibleInstruments = instruments.slice(
+    (instrumentPage - 1) * instrumentsPerPage,
+    instrumentPage * instrumentsPerPage,
+  );
+
+  React.useEffect(() => {
+    setInstrumentPage((current) => Math.min(current, instrumentPageCount));
+  }, [instrumentPageCount]);
+
+  const openInstrumentDetails = async (item: InstrumentRecord) => {
+    setSelectedInstrument(item);
+    setInstrumentDetailsLoading(true);
+    try {
+      const response = await getInstrumentById(token, item.instrumentId);
+      const event = response[0];
+      if (event) {
+        const args = getDamlCreateArguments<{
+          contractId?: unknown;
+          propertyId?: unknown;
+          instrumentId?: unknown;
+          totalUnits?: unknown;
+          ownerRetainedUnits?: unknown;
+          investorOfferedUnits?: unknown;
+          nominalValuePerUnit?: unknown;
+          investorUpfrontPricePerUnit?: unknown;
+          approvedInvestors?: unknown;
+          status?: unknown;
+        }>({ contractId: String(event.contractId), createArguments: event.createArguments });
+
+        setSelectedInstrument({
+          ...item,
+          contractId: String(event.contractId),
+          contractBusinessId: toStringValue(args.contractId, item.contractBusinessId),
+          propertyId: toStringValue(args.propertyId, item.propertyId),
+          instrumentId: toStringValue(args.instrumentId, item.instrumentId),
+          totalUnits: toNumber(args.totalUnits, item.totalUnits),
+          ownerRetainedUnits: toNumber(args.ownerRetainedUnits, item.ownerRetainedUnits ?? 0),
+          investorOfferedUnits: toNumber(args.investorOfferedUnits, item.investorOfferedUnits ?? 0),
+          nominalValuePerUnit: toNumber(args.nominalValuePerUnit, item.nominalValuePerUnit),
+          investorUpfrontPricePerUnit: toNumber(args.investorUpfrontPricePerUnit, item.investorUpfrontPricePerUnit),
+          approvedInvestors: Array.isArray(args.approvedInvestors)
+            ? args.approvedInvestors.map((investor) => String(investor))
+            : item.approvedInvestors,
+          status: toStringValue(args.status, item.status ?? 'SUBSCRIPTION_OPEN'),
+        });
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to load instrument details');
+    } finally {
+      setInstrumentDetailsLoading(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
@@ -277,35 +387,38 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
   return (
     <>
       <PageHeader
-        title="Easycoin investor approval"
-        description="Approve investor parties, then create the tokenized instrument from a validated managed contract."
+        title="Investment setup"
+        description="Approve investors and prepare participation instruments from your validated contracts."
       >
-        <Button variant="outline" size="sm" className="gap-2" onClick={refresh} disabled={refreshing}>
+        <Button variant="outline" size="sm" className="gap-2 rounded-xl" onClick={refresh} disabled={refreshing}>
           {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           Refresh
         </Button>
       </PageHeader>
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Card className="border-border/70">
-          <CardHeader className="pb-2">
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card className="border-border/70 bg-gradient-to-br from-primary/[0.06] to-background shadow-sm">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Approved investors</CardTitle>
+            <div className="rounded-xl bg-primary/10 p-2 text-primary"><Users className="h-4 w-4" /></div>
           </CardHeader>
           <CardContent>
             <span className="text-2xl font-semibold tracking-tight">{approvedInvestorOptions.length}</span>
           </CardContent>
         </Card>
-        <Card className="border-border/70">
-          <CardHeader className="pb-2">
+        <Card className="border-border/70 shadow-sm">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Validated contracts</CardTitle>
+            <div className="rounded-xl bg-muted p-2 text-muted-foreground"><CheckCircle2 className="h-4 w-4" /></div>
           </CardHeader>
           <CardContent>
             <span className="text-2xl font-semibold tracking-tight">{validatedContracts.length}</span>
           </CardContent>
         </Card>
-        <Card className="border-border/70">
-          <CardHeader className="pb-2">
+        <Card className="border-border/70 shadow-sm">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Active instruments</CardTitle>
+            <div className="rounded-xl bg-muted p-2 text-muted-foreground"><Coins className="h-4 w-4" /></div>
           </CardHeader>
           <CardContent>
             <span className="text-2xl font-semibold tracking-tight">{instruments.length}</span>
@@ -319,16 +432,21 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
         </Card>
       )}
 
-      <div className="mt-6 grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
-        <Card className="border-border/70">
-          <CardHeader className="space-y-2 border-b border-border/60">
-            <CardTitle className="text-lg">Approve investor</CardTitle>
-            <CardDescription>Select an investor party and provide a business approval reference.</CardDescription>
+      <div className="mt-8 grid gap-6 xl:grid-cols-2">
+        <Card className="min-w-0 overflow-hidden border-primary/15 bg-gradient-to-br from-primary/[0.04] via-background to-background shadow-sm">
+          <CardHeader className="space-y-3 border-b border-border/60 pb-5">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+              <UserRound className="h-5 w-5" />
+            </div>
+            <div className="space-y-1">
+              <CardTitle className="text-lg">Approve an investor</CardTitle>
+              <CardDescription>Choose an investor to allow participation in future instruments.</CardDescription>
+            </div>
           </CardHeader>
           <form onSubmit={handleApproveInvestor}>
-            <CardContent className="space-y-4 pt-6">
+            <CardContent className="space-y-5 pt-6">
               <div className="space-y-2">
-                <Label htmlFor="investor-party">Investor party</Label>
+                <Label htmlFor="investor-party">Select investor</Label>
                 <Select
                   value={approvalInvestor}
                   onValueChange={setApprovalInvestor}
@@ -342,42 +460,55 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
                         key={item.partyId}
                         value={item.partyId}
                       >
-                        {item.name}
+                        {item.partyId.split('::')[0]}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-muted-foreground">
-                  Party ID: {approvalInvestor}
-                </p>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="approval-reference">Approval reference</Label>
-                <Input
-                  id="approval-reference"
-                  value={approvalReference}
-                  onChange={(e) => setApprovalReference(e.target.value)}
-                />
+                <div className="flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-background/70 px-3 py-2.5">
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                      {getInvestorName(approvalInvestor).slice(0, 2).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">{getInvestorName(approvalInvestor)}</p>
+                      <p className="text-xs text-muted-foreground">Ready for approval</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    aria-label="Copy investor ID"
+                    title="Copy investor ID"
+                    className="shrink-0 rounded-md p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    onClick={() => void copyInvestorId(approvalInvestor)}
+                  >
+                    {copiedInvestorId === approvalInvestor ? (
+                      <Check className="h-4 w-4 text-success" />
+                    ) : (
+                      <Copy className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
               </div>
               <Button
                 type="submit"
-                className="w-full gap-2"
+                className="h-11 w-full gap-2 shadow-sm"
                 disabled={saving}
               >
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-                Approve investor
+                Approve selected investor
               </Button>
             </CardContent>
           </form>
         </Card>
 
-        <Card className="border-border/70">
+        <Card className="min-w-0 border-border/70">
           <CardHeader className="space-y-2 border-b border-border/60">
             <CardTitle className="text-lg">Create tokenized instrument</CardTitle>
-            <CardDescription>Select a validated contract and the approved investor parties.</CardDescription>
+            <CardDescription>Set the investment terms and choose who can participate.</CardDescription>
           </CardHeader>
           <form onSubmit={handleCreateInstrument}>
-            <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
+            <CardContent className="grid gap-5 pt-6 sm:grid-cols-2">
               <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="validated-contract">Validated contract</Label>
                 <Select
@@ -399,15 +530,7 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="instrument-id">Instrument ID</Label>
-                <Input
-                  id="instrument-id"
-                  value={instrumentForm.instrumentId}
-                  onChange={(e) => setInstrumentForm((current) => ({ ...current, instrumentId: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="total-units">Total units</Label>
+                <Label htmlFor="total-units">Units available</Label>
                 <Input
                   id="total-units"
                   type="number"
@@ -428,7 +551,7 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="upfront-price">Upfront price per unit</Label>
+                <Label htmlFor="upfront-price">Investor price per unit</Label>
                 <Input
                   id="upfront-price"
                   type="number"
@@ -438,13 +561,21 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
                   onChange={(e) => setInstrumentForm((current) => ({ ...current, investorUpfrontPricePerUnit: e.target.value }))}
                 />
               </div>
-              <div className="sm:col-span-2 space-y-3">
-                <p className="text-sm font-medium">Approved investors for the instrument</p>
+              <div className="space-y-3 sm:col-span-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold">Choose approved investors</p>
+                    <p className="text-xs text-muted-foreground">Select one or more eligible parties.</p>
+                  </div>
+                  <Badge variant="secondary" className="rounded-full">
+                    {selectedApprovedInvestors.length} selected
+                  </Badge>
+                </div>
                 <div className="grid gap-2 sm:grid-cols-2">
                   {approvedInvestorOptions.map((item) => (
                     <label
                       key={item.investor}
-                      className="flex min-w-0 items-start gap-3 rounded-xl border border-border/60 p-3"
+                      className="flex min-w-0 cursor-pointer items-start gap-3 rounded-xl border border-border/60 bg-background/60 p-3 transition-colors hover:border-primary/40 hover:bg-accent/30"
                     >
                       <Checkbox
                         checked={selectedApprovedInvestors.includes(item.investor)}
@@ -458,33 +589,37 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
                       />
                       <div className="min-w-0 flex-1">
                         <p
-                          className="break-all text-sm font-medium leading-5"
+                          className="truncate text-sm font-medium leading-5"
                           title={item.investor}
                         >
-                          {item.investor}
+                          {getInvestorName(item.investor)}
                         </p>
-                        <div className="mt-0.5 space-y-0.5">
-                          {item.approvalReferences.map((reference) => (
-                            <p
-                              key={reference}
-                              className="break-words text-xs leading-5 text-muted-foreground"
-                              title={reference}
-                            >
-                              {reference}
-                            </p>
-                          ))}
-                        </div>
                       </div>
+                      <button
+                        type="button"
+                        aria-label={`Copy ${getInvestorName(item.investor)} party ID`}
+                        title="Copy investor ID"
+                        className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          void copyInvestorId(item.investor);
+                        }}
+                      >
+                        {copiedInvestorId === item.investor ? (
+                          <Check className="h-4 w-4 text-success" />
+                        ) : (
+                          <Copy className="h-4 w-4" />
+                        )}
+                      </button>
                     </label>
                   ))}
                 </div>
               </div>
             </CardContent>
-            <div className="flex items-center justify-between gap-3 border-t border-border/60 px-6 py-5">
-              <p className="text-sm text-muted-foreground">
-                The backend will create TokenizedInstrument, TokenSupply, and the owner holding.
-              </p>
-              <Button type="submit" className="gap-2" disabled={saving || validatedContracts.length === 0}>
+            <div className="flex flex-wrap items-center justify-between gap-4 border-t border-border/60 px-6 py-5">
+              <p className="min-w-0 flex-1 text-sm text-muted-foreground">Review the details, then create the investment instrument.</p>
+              <Button type="submit" className="shrink-0 gap-2" disabled={saving || validatedContracts.length === 0}>
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlusCircle className="h-4 w-4" />}
                 Create instrument
               </Button>
@@ -493,11 +628,11 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
         </Card>
       </div>
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <Card className="border-border/70">
+      <div className="mt-8 grid gap-6 lg:grid-cols-2">
+        <Card className="min-w-0 border-border/70">
           <CardHeader>
             <CardTitle className="text-base font-semibold">Approved investors</CardTitle>
-            <CardDescription>Active approval contracts returned by the backend.</CardDescription>
+            <CardDescription>Investor parties approved to participate.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {approvedInvestorOptions.length === 0 ? (
@@ -506,19 +641,31 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
               </div>
             ) : (
               approvedInvestorOptions.map((item) => (
-                <div key={item.investor} className="rounded-xl border border-border/60 bg-background/60 p-4">
+                <div key={item.investor} className="group rounded-2xl border border-border/60 bg-gradient-to-br from-background to-muted/30 p-4 transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-sm">
                   <div className="flex min-w-0 items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="break-all font-medium" title={item.investor}>{item.investor}</p>
-                      {item.approvalReferences.map((reference) => (
-                        <p key={reference} className="break-words text-sm text-muted-foreground" title={reference}>
-                          {reference}
+                    <div className="flex min-w-0 flex-1 items-start gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                        <UserRound className="h-5 w-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate font-medium" title={item.investor}>
+                          {getInvestorName(item.investor)}
                         </p>
-                      ))}
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {item.approvalReferences.length} approval {item.approvalReferences.length === 1 ? 'reference' : 'references'}
+                        </p>
+                      </div>
                     </div>
                     <div className="shrink-0">
                       <StatusBadge status="Approved" />
                     </div>
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-1.5 border-t border-border/60 pt-3">
+                    {item.approvalReferences.map((reference) => (
+                      <span key={reference} className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium text-muted-foreground" title={reference}>
+                        {reference}
+                      </span>
+                    ))}
                   </div>
                 </div>
               ))
@@ -526,7 +673,7 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
           </CardContent>
         </Card>
 
-        <Card className="border-border/70">
+        <Card className="min-w-0 border-border/70">
           <CardHeader>
             <CardTitle className="text-base font-semibold">Tokenized instruments</CardTitle>
             <CardDescription>Created instruments and supply snapshots.</CardDescription>
@@ -537,33 +684,154 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
                 No instrument created yet.
               </div>
             ) : (
-              instruments.map((item) => (
-                <div key={item.contractId} className="rounded-xl border border-border/60 bg-background/60 p-4">
-                  <div className="flex min-w-0 items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="break-all font-medium" title={item.instrumentId}>{item.instrumentId}</p>
-                      <p className="break-all text-sm text-muted-foreground" title={item.contractId}>{item.contractId}</p>
+              visibleInstruments.map((item) => (
+                <div
+                  key={item.contractId}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => void openInstrumentDetails(item)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      void openInstrumentDetails(item);
+                    }
+                  }}
+                  className="group min-w-0 cursor-pointer overflow-hidden rounded-2xl border border-border/60 bg-gradient-to-br from-background via-background to-muted/30 p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <div className="flex min-w-0 flex-col items-start justify-between gap-3 sm:flex-row">
+                    <div className="flex min-w-0 flex-1 items-start gap-3">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary/15">
+                        <Building2 className="h-5 w-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-base font-semibold tracking-tight" title={item.instrumentId}>{item.instrumentId}</p>
+                        <p className="truncate text-xs text-muted-foreground" title={item.contractId}>
+                          Contract {item.contractId.slice(0, 15)}...
+                        </p>
+                        <p className="mt-1 truncate text-xs font-medium text-muted-foreground" title={item.propertyName}>
+                          {item.propertyName || 'Managed property'}
+                        </p>
+                      </div>
                     </div>
-                    <div className="shrink-0">
-                      <StatusBadge status="Token instrument created" />
+                    <div className="max-w-full shrink-0">
+                      <StatusBadge status={item.status === 'SUBSCRIPTION_OPEN' ? 'Open for subscription' : 'Token instrument created'} />
                     </div>
                   </div>
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <div className="mt-4 grid grid-cols-3 gap-3 border-t border-border/60 pt-3">
                     <div>
-                      <p className="text-xs uppercase tracking-wider text-muted-foreground">Units</p>
-                      <p className="mt-1 text-sm font-medium">{item.totalUnits}</p>
+                      <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Total units</p>
+                      <p className="mt-1 text-sm font-semibold tabular-nums">{item.totalUnits}</p>
                     </div>
                     <div>
-                      <p className="text-xs uppercase tracking-wider text-muted-foreground">Approved investors</p>
-                      <p className="mt-1 text-sm font-medium">{item.approvedInvestors.length}</p>
+                      <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Investor units</p>
+                      <p className="mt-1 text-sm font-semibold tabular-nums">{item.investorOfferedUnits ?? 0}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Approved</p>
+                      <p className="mt-1 text-sm font-semibold tabular-nums">{item.approvedInvestors.length}</p>
                     </div>
                   </div>
                 </div>
               ))
             )}
+            {instruments.length > instrumentsPerPage && (
+              <div className="flex items-center justify-between gap-3 border-t border-border/60 pt-4">
+                <p className="text-xs text-muted-foreground">
+                  Page {instrumentPage} of {instrumentPageCount}
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1"
+                    onClick={() => setInstrumentPage((current) => Math.max(1, current - 1))}
+                    disabled={instrumentPage === 1}
+                  >
+                    <ArrowLeft className="h-3.5 w-3.5" />
+                    Previous
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1"
+                    onClick={() => setInstrumentPage((current) => Math.min(instrumentPageCount, current + 1))}
+                    disabled={instrumentPage === instrumentPageCount}
+                  >
+                    Next
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
+
+      <Dialog
+        open={Boolean(selectedInstrument)}
+        onOpenChange={(open) => {
+          if (!open) setSelectedInstrument(null);
+        }}
+      >
+        <DialogContent className="max-w-xl">
+          {selectedInstrument && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Building2 className="h-5 w-5 text-muted-foreground" />
+                  {selectedInstrument.instrumentId}
+                </DialogTitle>
+                <DialogDescription>
+                  {instrumentDetailsLoading
+                    ? 'Loading the latest instrument details...'
+                    : 'Review the essential details before using this tokenized instrument.'}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border border-border/60 bg-muted/30 p-3">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Contract</p>
+                  <p className="mt-1 font-medium">{selectedInstrument.contractBusinessId || 'Not available'}</p>
+                </div>
+                <div className="rounded-xl border border-border/60 bg-muted/30 p-3">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Property</p>
+                  <p className="mt-1 font-medium">{selectedInstrument.propertyName || 'Managed property'}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{selectedInstrument.propertyId || 'Property ID not available'}</p>
+                </div>
+                <div className="rounded-xl border border-border/60 bg-muted/30 p-3">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Status</p>
+                  <div className="mt-1"><StatusBadge status={selectedInstrument.status ?? 'SUBSCRIPTION_OPEN'} /></div>
+                </div>
+                <div className="rounded-xl border border-border/60 bg-muted/30 p-3">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Total units</p>
+                  <p className="mt-1 font-medium">{selectedInstrument.totalUnits}</p>
+                </div>
+                <div className="rounded-xl border border-border/60 bg-muted/30 p-3">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Investor units</p>
+                  <p className="mt-1 font-medium">{selectedInstrument.investorOfferedUnits ?? 0}</p>
+                </div>
+                <div className="rounded-xl border border-border/60 bg-muted/30 p-3">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Owner units</p>
+                  <p className="mt-1 font-medium">{selectedInstrument.ownerRetainedUnits ?? 0}</p>
+                </div>
+                <div className="rounded-xl border border-border/60 bg-muted/30 p-3">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Nominal value / unit</p>
+                  <p className="mt-1 font-medium">{formatCurrency(selectedInstrument.nominalValuePerUnit)}</p>
+                </div>
+                <div className="rounded-xl border border-border/60 bg-muted/30 p-3">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Upfront price / unit</p>
+                  <p className="mt-1 font-medium">{formatCurrency(selectedInstrument.investorUpfrontPricePerUnit)}</p>
+                </div>
+                <div className="rounded-xl border border-border/60 bg-muted/30 p-3 sm:col-span-2">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Approved investors</p>
+                  <p className="mt-1 font-medium">{selectedInstrument.approvedInvestors.length}</p>
+                </div>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
@@ -1319,7 +1587,7 @@ function AuditorInvestmentsWorkspace({
   includeApprovedInvestors = false,
 }: {
   token: string;
-  roleLabel?: 'Auditor' | 'Legal admin';
+  roleLabel?: 'Owner' | 'Auditor' | 'Legal admin';
   includeApprovedInvestors?: boolean;
 }) {
   const [instruments, setInstruments] = React.useState<InvestorInstrumentRecord[]>([]);
@@ -1557,6 +1825,10 @@ function AuditorInvestmentsWorkspace({
       ))
     );
 
+  const uniqueInstrumentOptions = Array.from(
+    new Map(instruments.map((item) => [item.instrumentId, item])).values(),
+  );
+
   if (loading) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
@@ -1613,9 +1885,11 @@ function AuditorInvestmentsWorkspace({
           </CardHeader>
           <CardContent className="space-y-4">
             <Select value={selectedInstrumentId} onValueChange={setSelectedInstrumentId}>
-              <SelectTrigger><SelectValue placeholder="Select instrument" /></SelectTrigger>
+              <SelectTrigger className="min-w-0">
+                <SelectValue placeholder="Select instrument" />
+              </SelectTrigger>
               <SelectContent>
-                {instruments.map((item) => (
+                {uniqueInstrumentOptions.map((item) => (
                   <SelectItem key={item.contractId} value={item.instrumentId}>{item.instrumentId}</SelectItem>
                 ))}
               </SelectContent>
@@ -2097,6 +2371,10 @@ export default function InvestmentsPage() {
 
   if (session.role === 'EASYCOIN') {
     return <EasycoinInvestmentsWorkspace token={session.accessToken} />;
+  }
+
+  if (session.role === 'OWNER') {
+    return <AuditorInvestmentsWorkspace token={session.accessToken} roleLabel="Owner" />;
   }
 
   if (session.role === 'INVESTOR') {

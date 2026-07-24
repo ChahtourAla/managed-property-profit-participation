@@ -144,7 +144,7 @@ export function StatusBadge({ status }: { status: string }) {
   return (
     <Badge
       variant="outline"
-      className={cn('gap-1.5 font-medium', variant.className)}
+      className={cn('max-w-full gap-1.5 whitespace-normal text-center leading-4 font-medium', variant.className)}
     >
       <span className={cn('h-1.5 w-1.5 rounded-full', variant.dot)} />
       {status}
