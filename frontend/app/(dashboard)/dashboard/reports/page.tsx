@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 
 import { useSession } from '@/lib/session';
+import { getProperties, getPropertyDetails } from '@/lib/backend-api';
 import {
   acceptReport,
   createPerformanceReport,
@@ -97,6 +98,7 @@ const adminReaderParties = [
 type ReportRecord = {
   contractId: string;
   instrumentId: string;
+  propertyName?: string;
   periodLabel: string;
   reportHash: string;
 };
@@ -104,6 +106,7 @@ type ReportRecord = {
 type InstrumentOption = {
   contractId: string;
   instrumentId: string;
+  propertyName?: string;
 };
 
 function EasycoinReportsWorkspace({ token }: { token: string }) {
@@ -127,11 +130,14 @@ function EasycoinReportsWorkspace({ token }: { token: string }) {
   const loadData = React.useCallback(async () => {
     setLoading(true);
     try {
-      const [reportResponse, acceptedResponse, instrumentResponse] = await Promise.all([
+      const [reportResponse, acceptedResponse, instrumentResponse, propertyResponse] = await Promise.all([
         getReports(token),
         getAcceptedReports(token),
         getInstruments(token),
+        getProperties(token),
       ]);
+
+      const propertyNameById = new Map(propertyResponse.map((property) => [property.propertyId, property.name] as const));
 
       const normalizedReports = reportResponse.map((event) => {
         const args = getDamlCreateArguments<{
@@ -162,18 +168,27 @@ function EasycoinReportsWorkspace({ token }: { token: string }) {
       }).filter((item) => item.instrumentId);
 
       const normalizedInstruments = instrumentResponse.map((event) => {
-        const args = getDamlCreateArguments<{ instrumentId?: unknown }>({
+        const args = getDamlCreateArguments<{ instrumentId?: unknown; propertyId?: unknown }>({
           contractId: String(event.contractId),
           createArguments: event.createArguments,
         });
         return {
           contractId: String(event.contractId),
           instrumentId: toStringValue(args.instrumentId, ''),
+          propertyName: propertyNameById.get(toStringValue(args.propertyId, '')) ?? 'Property name unavailable',
         };
       }).filter((item) => item.instrumentId);
 
-      setReports(normalizedReports as ReportRecord[]);
-      setAcceptedReports(normalizedAccepted as ReportRecord[]);
+      const propertyNameByInstrumentId = new Map(
+        normalizedInstruments.map((item) => [item.instrumentId, item.propertyName] as const),
+      );
+      const addPropertyName = (item: ReportRecord): ReportRecord => ({
+        ...item,
+        propertyName: propertyNameByInstrumentId.get(item.instrumentId) ?? 'Property name unavailable',
+      });
+
+      setReports((normalizedReports as ReportRecord[]).map(addPropertyName));
+      setAcceptedReports((normalizedAccepted as ReportRecord[]).map(addPropertyName));
       setInstruments(normalizedInstruments as InstrumentOption[]);
       if (!form.instrumentId && normalizedInstruments[0]) {
         setForm((current) => ({ ...current, instrumentId: normalizedInstruments[0].instrumentId }));
@@ -276,14 +291,20 @@ function EasycoinReportsWorkspace({ token }: { token: string }) {
             <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
               <div className="space-y-2 sm:col-span-2">
                 <Label>Instrument</Label>
-                <Select value={form.instrumentId} onValueChange={(value) => setForm((current) => ({ ...current, instrumentId: value }))}>
+                <Select
+                  value={instruments.find((item) => item.instrumentId === form.instrumentId)?.contractId ?? ''}
+                  onValueChange={(contractId) => {
+                    const selected = instruments.find((item) => item.contractId === contractId);
+                    setForm((current) => ({ ...current, instrumentId: selected?.instrumentId ?? '' }));
+                  }}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select instrument" />
                   </SelectTrigger>
                   <SelectContent>
                     {instruments.map((item) => (
-                      <SelectItem key={item.contractId} value={item.instrumentId}>
-                        {item.instrumentId}
+                      <SelectItem key={item.contractId} value={item.contractId}>
+                        {item.propertyName}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -349,6 +370,7 @@ function EasycoinReportsWorkspace({ token }: { token: string }) {
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <p className="font-medium">{item.instrumentId}</p>
+                        <p className="text-sm font-medium text-primary">{item.propertyName}</p>
                         <p className="text-sm text-muted-foreground">{item.periodLabel}</p>
                       </div>
                       <Badge variant="outline">Report</Badge>
@@ -367,6 +389,7 @@ function EasycoinReportsWorkspace({ token }: { token: string }) {
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <p className="font-medium">{item.instrumentId}</p>
+                        <p className="text-sm font-medium text-primary">{item.propertyName}</p>
                         <p className="text-sm text-muted-foreground">{item.periodLabel}</p>
                       </div>
                       <Badge variant="secondary">Accepted</Badge>
@@ -385,6 +408,7 @@ function EasycoinReportsWorkspace({ token }: { token: string }) {
 type InvestorReportSummary = {
   contractId: string;
   instrumentId: string;
+  propertyName?: string;
   periodLabel: string;
   reportHash: string;
 };
@@ -442,6 +466,7 @@ function InvestorReportsWorkspace({
         paymentRewardResponse,
         rewardPaymentResponse,
         closedResponse,
+        propertyResponse,
       ] = await Promise.all([
         getInstruments(token),
         getReports(token),
@@ -451,20 +476,50 @@ function InvestorReportsWorkspace({
         getPaymentRewards(token),
         getRewardPaymentConfirmations(token),
         getClosedContracts(token),
+        getProperties(token),
       ]);
 
-      const normalizedInstruments = instrumentResponse
+      const propertyNameById = new Map(propertyResponse.map((property) => [property.propertyId, property.name] as const));
+
+      const instrumentSources = instrumentResponse
         .map((event) => {
-          const args = getDamlCreateArguments<{ instrumentId?: unknown }>({
+          const args = getDamlCreateArguments<{ instrumentId?: unknown; propertyId?: unknown }>({
             contractId: String(event.contractId),
             createArguments: event.createArguments,
           });
           return {
             contractId: String(event.contractId),
             instrumentId: toStringValue(args.instrumentId, ''),
+            propertyId: toStringValue(args.propertyId, ''),
           };
         })
         .filter((item) => item.instrumentId);
+
+      const missingPropertyIds = Array.from(new Set(
+        instrumentSources
+          .map((item) => item.propertyId)
+          .filter((propertyId): propertyId is string => Boolean(propertyId && !propertyNameById.has(propertyId))),
+      ));
+      const propertyDetails = await Promise.all(
+        missingPropertyIds.map(async (propertyId) => {
+          try {
+            return await getPropertyDetails(token, propertyId);
+          } catch {
+            return null;
+          }
+        }),
+      );
+      propertyDetails.forEach((property) => {
+        if (property?.propertyId && property.name) {
+          propertyNameById.set(property.propertyId, property.name);
+        }
+      });
+
+      const normalizedInstruments = instrumentSources.map((item) => ({
+        contractId: item.contractId,
+        instrumentId: item.instrumentId,
+        propertyName: propertyNameById.get(item.propertyId) ?? 'Property name unavailable',
+      }));
 
       const effectiveInstrumentId = selectedInstrumentId || normalizedInstruments[0]?.instrumentId || '';
       const byInstrument = effectiveInstrumentId
@@ -473,9 +528,16 @@ function InvestorReportsWorkspace({
 
       setInstruments(normalizedInstruments as InstrumentOption[]);
       setSelectedInstrumentId(effectiveInstrumentId);
-      setReports(reportResponse.map(mapReport).filter((item) => item.instrumentId));
-      setAcceptedReports(acceptedResponse.map(mapReport).filter((item) => item.instrumentId));
-      setInstrumentReports(byInstrument.map(mapReport).filter((item) => item.instrumentId));
+      const propertyNameByInstrumentId = new Map(
+        normalizedInstruments.map((item) => [item.instrumentId, item.propertyName] as const),
+      );
+      const addPropertyName = (item: ReportRecord) => ({
+        ...item,
+        propertyName: propertyNameByInstrumentId.get(item.instrumentId) ?? 'Property name unavailable',
+      });
+      setReports(reportResponse.map(mapReport).filter((item) => item.instrumentId).map(addPropertyName));
+      setAcceptedReports(acceptedResponse.map(mapReport).filter((item) => item.instrumentId).map(addPropertyName));
+      setInstrumentReports(byInstrument.map(mapReport).filter((item) => item.instrumentId).map(addPropertyName));
 
       setSettlements(
         settlementResponse.map((event) => {
@@ -816,6 +878,7 @@ function AuditorReportsWorkspace({ token }: { token: string }) {
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0">
                       <p className="font-medium">{item.instrumentId}</p>
+                      <p className="mt-0.5 text-sm font-medium text-primary">{item.propertyName}</p>
                       <p className="truncate text-sm text-muted-foreground">{item.periodLabel} - {item.reportHash}</p>
                     </div>
                     <Button size="sm" className="gap-2" onClick={(event) => { event.stopPropagation(); void handleAcceptReport(item.contractId); }} disabled={accepting === item.contractId}>

@@ -8,10 +8,10 @@ import { useSession } from '@/lib/session';
 import {
   getDamlCreateArguments,
   getHoldingByCid,
+  getClosedContracts,
   getHoldings,
   getHoldingsByHolder,
   getHoldingsByInstrument,
-  redeemAllHoldings,
   redeemHolding,
   toNumber,
   toStringValue,
@@ -37,8 +37,15 @@ type HoldingRecord = {
   holdingCid: string;
   holder: string;
   instrumentId: string;
+  managedContractId: string;
   amount: number;
   status: string;
+};
+
+type ClosedContractOption = {
+  contractId: string;
+  managedContractId: string;
+  instrumentId: string;
 };
 
 const allowedRoles: AppRole[] = [
@@ -53,6 +60,7 @@ const allowedRoles: AppRole[] = [
 function mapHolding(event: { contractId: string; createArguments?: Record<string, unknown> }): HoldingRecord {
   const args = getDamlCreateArguments<{
     holder?: unknown;
+    contractId?: unknown;
     instrumentId?: unknown;
     instrumentIdText?: unknown;
     amount?: unknown;
@@ -64,6 +72,7 @@ function mapHolding(event: { contractId: string; createArguments?: Record<string
     holdingCid: String(event.contractId),
     holder: toStringValue(args.holder, ''),
     instrumentId: toStringValue(args.instrumentIdText ?? args.instrumentId, ''),
+    managedContractId: toStringValue(args.contractId, ''),
     amount: toNumber(args.amount ?? args.units),
     status: toStringValue(args.status, 'ACTIVE'),
   };
@@ -75,6 +84,16 @@ function displayPartyName(partyId: string) {
 
 function shortenReference(value: string) {
   return value.length > 18 ? `${value.slice(0, 18)}...` : value;
+}
+
+function belongsToClosedContract(item: HoldingRecord, closed: ClosedContractOption) {
+  const hasContractIds = Boolean(item.managedContractId && closed.managedContractId);
+  const sameContract = hasContractIds
+    ? item.managedContractId === closed.managedContractId
+    : item.instrumentId === closed.instrumentId;
+  const sameInstrument = item.instrumentId === closed.instrumentId;
+
+  return sameContract && sameInstrument && item.status.toUpperCase() === 'ACTIVE';
 }
 
 function dedupeHoldings(items: HoldingRecord[]) {
@@ -106,6 +125,7 @@ export default function HoldingsPage() {
   const [redeemHoldingCid, setRedeemHoldingCid] = React.useState('');
   const [burnReference, setBurnReference] = React.useState('BURN-INSTR-MPC-001-INVESTOR-1');
   const [pendingAction, setPendingAction] = React.useState<string | null>(null);
+  const [closedContracts, setClosedContracts] = React.useState<ClosedContractOption[]>([]);
 
   const canUseHoldings = allowedRoles.includes(session.role);
 
@@ -114,7 +134,7 @@ export default function HoldingsPage() {
 
     setLoading(true);
     try {
-      const [holdingResponse, byInstrumentResponse, byHolderResponse, byCidResponse] = await Promise.all([
+      const [holdingResponse, byInstrumentResponse, byHolderResponse, byCidResponse, closedResponse] = await Promise.all([
         getHoldings(session.accessToken),
         instrumentId.trim()
           ? getHoldingsByInstrument(session.accessToken, instrumentId.trim()).catch(() => [])
@@ -125,23 +145,49 @@ export default function HoldingsPage() {
         holdingCid.trim()
           ? getHoldingByCid(session.accessToken, holdingCid.trim()).catch(() => [])
           : Promise.resolve([]),
+        getClosedContracts(session.accessToken),
       ]);
 
       const normalized = holdingResponse.map(mapHolding).filter((item) => item.instrumentId);
       const byInstrument = byInstrumentResponse.map(mapHolding).filter((item) => item.instrumentId);
       const byHolder = byHolderResponse.map(mapHolding).filter((item) => item.instrumentId);
       const byCid = byCidResponse.map(mapHolding).filter((item) => item.instrumentId);
+      const closed = closedResponse
+        .map((event) => {
+          const args = getDamlCreateArguments<{ contractId?: unknown; instrumentId?: unknown }>({
+            contractId: String(event.contractId),
+            createArguments: event.createArguments,
+          });
+          return {
+            contractId: String(event.contractId),
+            managedContractId: toStringValue(args.contractId, ''),
+            instrumentId: toStringValue(args.instrumentId, ''),
+          };
+        })
+        .filter((item) => item.instrumentId);
 
       setHoldings(normalized);
       setInstrumentHoldings(byInstrument);
       setHolderHoldings(byHolder);
       setCidHolding(byCid[0] ?? null);
+      setClosedContracts(closed);
+      if (!redeemClosedCid && closed[0]) {
+        setRedeemClosedCid(closed[0].contractId);
+        setBurnReferencePrefix(`BURN-${closed[0].instrumentId}`);
+        const firstHolding = normalized.find(
+          (item) => belongsToClosedContract(item, closed[0]),
+        );
+        setRedeemHoldingCid(firstHolding?.holdingCid ?? '');
+        if (firstHolding) {
+          setBurnReference(`BURN-${closed[0].instrumentId}-${displayPartyName(firstHolding.holder)}`);
+        }
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Unable to load holdings');
     } finally {
       setLoading(false);
     }
-  }, [canUseHoldings, holdingCid, holder, instrumentId, session.accessToken]);
+  }, [canUseHoldings, holdingCid, holder, instrumentId, redeemClosedCid, session.accessToken]);
 
   React.useEffect(() => {
     void loadData();
@@ -156,18 +202,36 @@ export default function HoldingsPage() {
     }
   };
 
+  const selectedClosedContract = closedContracts.find((item) => item.contractId === redeemClosedCid);
+  const eligibleRedeemHoldings = selectedClosedContract
+    ? holdings.filter((item) => belongsToClosedContract(item, selectedClosedContract))
+    : [];
+
   const handleRedeemAll = async () => {
     if (!redeemClosedCid.trim()) {
       toast.error('Enter a closed contract CID');
       return;
     }
 
+    const selectedContract = closedContracts.find((item) => item.contractId === redeemClosedCid.trim());
+    const matchingHoldings = selectedContract
+      ? holdings.filter((item) => belongsToClosedContract(item, selectedContract))
+      : [];
+
+    if (!selectedContract || matchingHoldings.length === 0) {
+      toast.error('No active holdings found for the selected closed contract');
+      return;
+    }
+
     setPendingAction('redeem-all');
     try {
-      await redeemAllHoldings(session.accessToken, redeemClosedCid.trim(), {
-        burnReferencePrefix: burnReferencePrefix.trim() || undefined,
-      });
-      toast.success('All active holdings redeemed');
+      for (const holding of matchingHoldings) {
+        await redeemHolding(session.accessToken, redeemClosedCid.trim(), {
+          holdingCid: holding.holdingCid,
+          burnReference: `${burnReferencePrefix.trim() || `BURN-${selectedContract.instrumentId}`}-${holding.holdingCid.slice(0, 8)}`,
+        });
+      }
+      toast.success(`${matchingHoldings.length} holding(s) redeemed`);
       await loadData();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Unable to redeem all holdings');
@@ -343,11 +407,34 @@ export default function HoldingsPage() {
             <div className="space-y-4">
               <div className="space-y-2">
                 <Label>Closed contract CID</Label>
-                <Input
+                <Select
                   value={redeemClosedCid}
-                  onChange={(event) => setRedeemClosedCid(event.target.value)}
-                  placeholder="00f7c1..."
-                />
+                  onValueChange={(contractId) => {
+                    const selected = closedContracts.find((item) => item.contractId === contractId);
+                    setRedeemClosedCid(contractId);
+                    if (selected) {
+                      setBurnReferencePrefix(`BURN-${selected.instrumentId}`);
+                      const firstHolding = holdings.find(
+                        (item) => belongsToClosedContract(item, selected),
+                      );
+                      setRedeemHoldingCid(firstHolding?.holdingCid ?? '');
+                      if (firstHolding) {
+                        setBurnReference(`BURN-${selected.instrumentId}-${displayPartyName(firstHolding.holder)}`);
+                      }
+                    }
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a closed contract" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {closedContracts.map((item) => (
+                      <SelectItem key={item.contractId} value={item.contractId}>
+                        {item.instrumentId} · {shortenReference(item.contractId)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
                 <Label>Burn reference prefix</Label>
@@ -369,10 +456,30 @@ export default function HoldingsPage() {
             <div className="space-y-4">
               <div className="space-y-2">
                 <Label>Holding CID</Label>
-                <Input
+                <Select
                   value={redeemHoldingCid}
-                  onChange={(event) => setRedeemHoldingCid(event.target.value)}
-                  placeholder="00f7c1..."
+                  onValueChange={(value) => {
+                    setRedeemHoldingCid(value);
+                    const selected = eligibleRedeemHoldings.find((item) => item.holdingCid === value);
+                    if (selectedClosedContract && selected) {
+                      setBurnReference(`BURN-${selectedClosedContract.instrumentId}-${displayPartyName(selected.holder)}`);
+                    }
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a holding" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {eligibleRedeemHoldings.map((item) => (
+                      <SelectItem key={item.holdingCid} value={item.holdingCid}>
+                        {displayPartyName(item.holder)} · {item.amount} units · {shortenReference(item.holdingCid)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {/* Keep the complete CID available to the action without exposing a technical input. */}
+                <input type="hidden"
+                  value={redeemHoldingCid}
                 />
               </div>
               <div className="space-y-2">

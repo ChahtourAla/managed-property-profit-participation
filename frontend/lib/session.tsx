@@ -4,7 +4,6 @@ import * as React from 'react';
 
 import {
   demoUsers,
-  localDamlParties,
   type AppRole,
   type DemoUser,
 } from '@/lib/role-config';
@@ -39,49 +38,6 @@ type SessionContextValue = {
 };
 
 export const SESSION_STORAGE_KEY = 'easycoin.demo.session';
-const PARTY_COUNTER_KEY = 'easycoin.party.counters';
-
-type PartyCounterState = Partial<Record<AppRole, number>>;
-
-const getPartyCounterState = (): PartyCounterState => {
-  try {
-    const raw = window.localStorage.getItem(PARTY_COUNTER_KEY);
-    return raw ? (JSON.parse(raw) as PartyCounterState) : {};
-  } catch {
-    return {};
-  }
-};
-
-const setPartyCounterState = (state: PartyCounterState) => {
-  window.localStorage.setItem(PARTY_COUNTER_KEY, JSON.stringify(state));
-};
-
-const nextPartyId = (role: AppRole) => {
-  const counters = getPartyCounterState();
-  const nextCount = (counters[role] ?? 0) + 1;
-  counters[role] = nextCount;
-  setPartyCounterState(counters);
-
-  const predefinedParties: Partial<Record<AppRole, string[]>> = {
-    OWNER: [localDamlParties.owner],
-    EASYCOIN: [localDamlParties.easycoin],
-    INVESTOR: [
-      localDamlParties.investor1,
-      localDamlParties.investor2,
-      localDamlParties.investor3,
-      localDamlParties.investor4,
-    ],
-    AUDITOR: [localDamlParties.auditor],
-    PAYMENT_VERIFIER: [localDamlParties.paymentVerifier],
-    LEGAL_ADMIN: [localDamlParties.legalAdmin],
-  };
-
-  const party = predefinedParties[role]?.[nextCount - 1];
-  if (party) return party;
-
-  return `Party::${role}${nextCount}`;
-};
-
 const buildSessionFromUser = (
   user: BackendAuthUser,
   accessToken: string
@@ -199,10 +155,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
             const response = await signup({
               email: normalizedEmail,
               password,
-              fullName: demoUsers[role].name,
-              role,
-              partyId: nextPartyId(role),
-            });
+            fullName: demoUsers[role].name,
+            role,
+          });
 
             const nextSession = buildSessionFromUser(
               response.user,
@@ -243,7 +198,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
             password,
             fullName: fullName?.trim() || demoUsers[role].name,
             role,
-            partyId: nextPartyId(role),
           });
 
           const nextSession = buildSessionFromUser(

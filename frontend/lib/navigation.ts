@@ -39,6 +39,13 @@ export const mainNav: NavGroup[] = [
         roles: ['OWNER', 'EASYCOIN', 'INVESTOR', 'AUDITOR', 'PAYMENT_VERIFIER', 'LEGAL_ADMIN', 'ADMIN'],
       },
       {
+        title: 'My Properties',
+        href: '/dashboard/my-properties',
+        icon: Building2,
+        description: 'Create and manage your property profiles',
+        roles: ['OWNER'],
+      },
+      {
         title: 'Managed Contract',
         href: '/dashboard/properties',
         icon: Landmark,
@@ -93,13 +100,6 @@ export const mainNav: NavGroup[] = [
         icon: Activity,
         description: 'System checks and demo preferences',
         roles: ['ADMIN', 'EASYCOIN'],
-      },
-      {
-        title: 'My Properties',
-        href: '/dashboard/my-properties',
-        icon: Building2,
-        description: 'Create and manage your property profiles',
-        roles: ['OWNER'],
       },
       {
         title: 'User management',

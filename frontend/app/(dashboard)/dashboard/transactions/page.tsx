@@ -4,6 +4,7 @@ import * as React from 'react';
 import { Loader2, RefreshCw, FileText, ShieldCheck, PlusCircle, XCircle, CheckCircle2 } from 'lucide-react';
 
 import { useSession } from '@/lib/session';
+import { getProperties } from '@/lib/backend-api';
 import {
   closeSettlement,
   createRewardRecords,
@@ -49,9 +50,14 @@ const adminReaderParties = [
   { label: 'Legal admin', value: localDamlParties.legalAdmin },
 ];
 
+function displayPartyName(partyId: string) {
+  return partyId.split('::')[0] || partyId;
+}
+
 type SettlementRecord = {
   contractId: string;
   instrumentId: string;
+  propertyName?: string;
   totalRentalIncome: number;
   totalExpenses: number;
   netProfitBeforeFee: number;
@@ -71,11 +77,13 @@ type RewardRecord = {
 type ClosedRecord = {
   contractId: string;
   instrumentId: string;
+  propertyName?: string;
 };
 
 type InstrumentOption = {
   contractId: string;
   instrumentId: string;
+  propertyName?: string;
 };
 
 const settlementFilters: FilterOption[] = [
@@ -109,12 +117,27 @@ function EasycoinTransactionsWorkspace({ token }: { token: string }) {
   const loadData = React.useCallback(async () => {
     setLoading(true);
     try {
-      const [settlementResponse, rewardResponse, closedResponse, instrumentResponse] = await Promise.all([
+      const [settlementResponse, rewardResponse, closedResponse, instrumentResponse, properties] = await Promise.all([
         getSettlements(token),
         getRewardRecords(token),
         getClosedContracts(token),
         getInstruments(token),
+        getProperties(token),
       ]);
+
+      const propertyNames = new Map(properties.map((property) => [property.propertyId, property.name]));
+      const propertyNamesByInstrument = new Map(
+        instrumentResponse.map((event) => {
+          const args = getDamlCreateArguments<{ instrumentId?: unknown; propertyId?: unknown }>({
+            contractId: String(event.contractId),
+            createArguments: event.createArguments,
+          });
+          return [
+            toStringValue(args.instrumentId, ''),
+            propertyNames.get(toStringValue(args.propertyId, '')),
+          ] as const;
+        }),
+      );
 
       setSettlements(
         settlementResponse
@@ -133,6 +156,7 @@ function EasycoinTransactionsWorkspace({ token }: { token: string }) {
             return {
               contractId: String(event.contractId),
               instrumentId: toStringValue(args.instrumentId, ''),
+              propertyName: propertyNamesByInstrument.get(toStringValue(args.instrumentId, '')),
               totalRentalIncome: toNumber(args.totalRentalIncome),
               totalExpenses: toNumber(args.totalExpenses),
               netProfitBeforeFee: toNumber(args.netProfitBeforeFee),
@@ -172,19 +196,21 @@ function EasycoinTransactionsWorkspace({ token }: { token: string }) {
             return {
               contractId: String(event.contractId),
               instrumentId: toStringValue(args.instrumentId, ''),
+              propertyName: propertyNamesByInstrument.get(toStringValue(args.instrumentId, '')),
             };
           })
           .filter((item) => item.instrumentId) as ClosedRecord[]
       );
 
       const normalizedInstruments = instrumentResponse.map((event) => {
-        const args = getDamlCreateArguments<{ instrumentId?: unknown }>({
+        const args = getDamlCreateArguments<{ instrumentId?: unknown; propertyId?: unknown }>({
           contractId: String(event.contractId),
           createArguments: event.createArguments,
         });
         return {
           contractId: String(event.contractId),
           instrumentId: toStringValue(args.instrumentId, ''),
+          propertyName: propertyNames.get(toStringValue(args.propertyId, '')),
         };
       }).filter((item) => item.instrumentId);
 
@@ -336,14 +362,23 @@ function EasycoinTransactionsWorkspace({ token }: { token: string }) {
             <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
               <div className="space-y-2 sm:col-span-2">
                 <Label>Instrument</Label>
-                <Select value={reconciliationForm.instrumentId} onValueChange={(value) => setReconciliationForm((current) => ({ ...current, instrumentId: value }))}>
+                <Select
+                  value={instruments.find((item) => item.instrumentId === reconciliationForm.instrumentId)?.contractId ?? ''}
+                  onValueChange={(contractId) => {
+                    const selected = instruments.find((item) => item.contractId === contractId);
+                    setReconciliationForm((current) => ({
+                      ...current,
+                      instrumentId: selected?.instrumentId ?? '',
+                    }));
+                  }}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select instrument" />
                   </SelectTrigger>
                   <SelectContent>
                     {instruments.map((item) => (
-                      <SelectItem key={item.contractId} value={item.instrumentId}>
-                        {item.instrumentId}
+                      <SelectItem key={item.contractId} value={item.contractId}>
+                        {item.propertyName ?? 'Property name unavailable'}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -407,7 +442,7 @@ function EasycoinTransactionsWorkspace({ token }: { token: string }) {
                 <SelectContent>
                     {settlements.map((item) => (
                     <SelectItem key={item.contractId} value={item.contractId} className="max-w-full">
-                      <span className="break-all">{item.contractId} - {item.instrumentId}</span>
+                      <span className="truncate">{item.propertyName ?? 'Property name unavailable'}</span>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -452,6 +487,7 @@ function EasycoinTransactionsWorkspace({ token }: { token: string }) {
               settlements.map((item) => (
                 <div key={item.contractId} className="min-w-0 rounded-xl border border-border/60 bg-background/60 p-4">
                   <p className="break-all font-medium" title={item.instrumentId}>{item.instrumentId}</p>
+                  <p className="mt-1 text-sm font-medium text-primary">{item.propertyName ?? 'Property name unavailable'}</p>
                   <p className="break-all text-sm text-muted-foreground" title={item.contractId}>{item.contractId}</p>
                   <div className="mt-2"><StatusBadge status="Reconciled" /></div>
                 </div>
@@ -469,7 +505,7 @@ function EasycoinTransactionsWorkspace({ token }: { token: string }) {
             ) : (
               rewards.map((item) => (
                 <div key={item.contractId} className="min-w-0 rounded-xl border border-border/60 bg-background/60 p-4">
-                  <p className="break-all font-medium" title={item.recipient}>{item.recipient}</p>
+                  <p className="font-medium" title={item.recipient}>{displayPartyName(item.recipient)}</p>
                   <p className="break-all text-sm text-muted-foreground" title={item.holdingCid}>{item.holdingCid}</p>
                 </div>
               ))
@@ -487,6 +523,7 @@ function EasycoinTransactionsWorkspace({ token }: { token: string }) {
               closedContracts.map((item) => (
                 <div key={item.contractId} className="min-w-0 rounded-xl border border-border/60 bg-background/60 p-4">
                   <p className="break-all font-medium" title={item.instrumentId}>{item.instrumentId}</p>
+                  <p className="mt-1 text-sm font-medium text-primary">{item.propertyName ?? 'Property name unavailable'}</p>
                   <p className="break-all text-sm text-muted-foreground" title={item.contractId}>{item.contractId}</p>
                 </div>
               ))
@@ -935,7 +972,7 @@ function PaymentVerifierTransactionsWorkspace({ token }: { token: string }) {
               <div key={item.contractId} className="rounded-xl border border-border/60 bg-background/60 p-4">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
-                    <p className="font-medium">{item.recipient || item.instrumentId}</p>
+                    <p className="font-medium" title={item.recipient}>{item.recipient ? displayPartyName(item.recipient) : item.instrumentId}</p>
                     <p className="truncate text-sm text-muted-foreground">{item.contractId}</p>
                     <p className="mt-2 text-sm">{formatCurrency(item.amount ?? 0)}</p>
                   </div>

@@ -51,10 +51,10 @@ export function StatCard({
   return (
     <Card className="overflow-hidden border-primary/10 bg-gradient-to-br from-background via-background to-primary/[0.035] shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-md">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">
+        <CardTitle className="text-sm font-medium text-[var(--brand-gold)]">
           {label}
         </CardTitle>
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--brand-gold)]/15 text-[var(--brand-gold)]">
           <Icon className="h-4 w-4" />
         </div>
       </CardHeader>

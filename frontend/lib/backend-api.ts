@@ -147,7 +147,6 @@ export async function signup(params: {
   password: string;
   fullName?: string;
   role: string;
-  partyId?: string;
 }) {
   return request<AuthResponse>('/auth/signup', {
     method: 'POST',
@@ -296,6 +295,15 @@ export async function approveProperty(accessToken: string, propertyId: string) {
 
 export async function getUsers(accessToken: string) {
   return request<BackendUser[]>('/users', {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+}
+
+export async function getEligibleInvestors(accessToken: string) {
+  return request<BackendUser[]>('/investors/eligible', {
     method: 'GET',
     headers: {
       Authorization: `Bearer ${accessToken}`,

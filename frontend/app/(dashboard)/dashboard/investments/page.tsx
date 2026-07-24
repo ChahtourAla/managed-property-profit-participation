@@ -6,7 +6,7 @@ import { ArrowLeft, ArrowRight, Building2, Check, CheckCircle2, Coins, Copy, Loa
 import { investments, type Investment } from '@/lib/mock-investments';
 import { formatCurrency, formatDate } from '@/lib/format';
 import { useSession } from '@/lib/session';
-import { getProperties, getPropertyDetails } from '@/lib/backend-api';
+import { getEligibleInvestors, getProperties, getPropertyDetails } from '@/lib/backend-api';
 import {
   approveInvestor,
   confirmFunding,
@@ -141,6 +141,7 @@ function nextApprovalReference(records: ApprovedInvestorRecord[]) {
 
 function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
   const [approvedInvestors, setApprovedInvestors] = React.useState<ApprovedInvestorRecord[]>([]);
+  const [eligibleInvestors, setEligibleInvestors] = React.useState<Array<{ id: string; fullName?: string | null; email: string; partyId?: string | null }>>([]);
   const [validatedContracts, setValidatedContracts] = React.useState<ValidatedContractRecord[]>([]);
   const [instruments, setInstruments] = React.useState<InstrumentRecord[]>([]);
   const [selectedContractId, setSelectedContractId] = React.useState('');
@@ -166,8 +167,9 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
     setLoading(true);
     setError(null);
     try {
-      const [investorResponse, validatedResponse, instrumentResponse, propertyResponse] = await Promise.all([
+      const [investorResponse, eligibleInvestorResponse, validatedResponse, instrumentResponse, propertyResponse] = await Promise.all([
         getApprovedInvestors(token),
+        getEligibleInvestors(token),
         getValidatedContracts(token),
         getInstruments(token),
         getProperties(token),
@@ -238,6 +240,20 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
       }).filter((item) => item.instrumentId);
 
       setApprovedInvestors(normalizedApproved as ApprovedInvestorRecord[]);
+      const normalizedEligibleInvestors = eligibleInvestorResponse
+        .filter((user) => user.partyId)
+        .map((user) => ({
+          id: user.id,
+          fullName: user.fullName,
+          email: user.email,
+          partyId: user.partyId,
+        }));
+      setEligibleInvestors(normalizedEligibleInvestors);
+      setApprovalInvestor((current) =>
+        normalizedEligibleInvestors.some((user) => user.partyId === current)
+          ? current
+          : normalizedEligibleInvestors[0]?.partyId ?? '',
+      );
       setValidatedContracts(normalizedValidated as ValidatedContractRecord[]);
       setInstruments(normalizedInstruments as InstrumentRecord[]);
       setInstrumentForm((current) => ({
@@ -320,8 +336,20 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
 
   const approvedInvestorOptions = groupApprovedInvestors(approvedInvestors);
 
+  const eligibleInvestorOptions = eligibleInvestors.filter(
+    (investor): investor is typeof investor & { partyId: string } => Boolean(investor.partyId),
+  );
+
   const getInvestorName = (partyId: string) =>
     partyId.split('::')[0] || 'Investor';
+
+  const getEligibleInvestorName = (investor: { fullName?: string | null; partyId: string }) =>
+    investor.fullName?.trim() || getInvestorName(investor.partyId);
+
+  const getInvestorDisplayName = (partyId: string) => {
+    const investor = eligibleInvestors.find((item) => item.partyId === partyId);
+    return investor ? getEligibleInvestorName({ ...investor, partyId }) : getInvestorName(partyId);
+  };
 
   const copyInvestorId = async (partyId: string) => {
     await navigator.clipboard.writeText(partyId);
@@ -462,12 +490,12 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
                     <SelectValue placeholder="Select investor" />
                   </SelectTrigger>
                   <SelectContent>
-                    {sampleInvestors.map((item) => (
+                    {eligibleInvestorOptions.map((item) => (
                       <SelectItem
-                        key={item.partyId}
+                        key={item.id}
                         value={item.partyId}
                       >
-                        {item.partyId.split('::')[0]}
+                        {getEligibleInvestorName(item)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -478,8 +506,16 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
                       {getInvestorName(approvalInvestor).slice(0, 2).toUpperCase()}
                     </div>
                     <div className="min-w-0">
-                      <p className="text-sm font-medium">{getInvestorName(approvalInvestor)}</p>
-                      <p className="text-xs text-muted-foreground">Ready for approval</p>
+                      <p className="text-sm font-medium">
+                        {getEligibleInvestorName(
+                          eligibleInvestorOptions.find((investor) => investor.partyId === approvalInvestor) ?? {
+                            partyId: approvalInvestor,
+                          },
+                        )}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {eligibleInvestorOptions.find((investor) => investor.partyId === approvalInvestor)?.email ?? 'Ready for approval'}
+                      </p>
                     </div>
                   </div>
                   <button
@@ -500,7 +536,7 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
               <Button
                 type="submit"
                 className="h-11 w-full gap-2 shadow-sm"
-                disabled={saving}
+                disabled={saving || !approvalInvestor || eligibleInvestorOptions.length === 0}
               >
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
                 Approve selected investor
@@ -599,12 +635,12 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
                           className="truncate text-sm font-medium leading-5"
                           title={item.investor}
                         >
-                          {getInvestorName(item.investor)}
+                          {getInvestorDisplayName(item.investor)}
                         </p>
                       </div>
                       <button
                         type="button"
-                        aria-label={`Copy ${getInvestorName(item.investor)} party ID`}
+                        aria-label={`Copy ${getInvestorDisplayName(item.investor)} party ID`}
                         title="Copy investor ID"
                         className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                         onClick={(event) => {
@@ -656,7 +692,7 @@ function EasycoinInvestmentsWorkspace({ token }: { token: string }) {
                       </div>
                       <div className="min-w-0">
                         <p className="truncate font-medium" title={item.investor}>
-                          {getInvestorName(item.investor)}
+                          {getInvestorDisplayName(item.investor)}
                         </p>
                         <p className="mt-1 text-xs text-muted-foreground">
                           {item.approvalReferences.length} approval {item.approvalReferences.length === 1 ? 'reference' : 'references'}
@@ -1666,6 +1702,7 @@ function AuditorInvestmentsWorkspace({
         rewardResponse,
         rewardConfirmationResponse,
         approvedInvestorResponse,
+        propertyResponse,
       ] = await Promise.all([
         getInstruments(token),
         getSubscriptions(token),
@@ -1674,12 +1711,19 @@ function AuditorInvestmentsWorkspace({
         getPaymentRewards(token),
         getRewardPaymentConfirmations(token),
         includeApprovedInvestors ? getApprovedInvestors(token) : Promise.resolve([]),
+        getProperties(token).catch(() => []),
       ]);
+
+      const propertyNameById = new Map(
+        propertyResponse.map((property) => [property.propertyId, property.name] as const),
+      );
 
       const normalizedInstruments = instrumentResponse
         .map((event) => {
           const args = getDamlCreateArguments<{
             contractId?: unknown;
+            propertyId?: unknown;
+            propertyName?: unknown;
             instrumentId?: unknown;
             totalUnits?: unknown;
             investorOfferedUnits?: unknown;
@@ -1690,6 +1734,11 @@ function AuditorInvestmentsWorkspace({
           return {
             contractId: String(event.contractId),
             contractBusinessId: toStringValue(args.contractId, ''),
+            propertyId: toStringValue(args.propertyId, ''),
+            propertyName: toStringValue(
+              args.propertyName,
+              propertyNameById.get(toStringValue(args.propertyId, '')) ?? 'Property name unavailable',
+            ),
             instrumentId: toStringValue(args.instrumentId, ''),
             totalUnits: toNumber(args.totalUnits),
             investorOfferedUnits: toNumber(args.investorOfferedUnits),
@@ -1939,7 +1988,9 @@ function AuditorInvestmentsWorkspace({
               </SelectTrigger>
               <SelectContent>
                 {uniqueInstrumentOptions.map((item) => (
-                  <SelectItem key={item.contractId} value={item.instrumentId}>{item.instrumentId}</SelectItem>
+                  <SelectItem key={item.contractId} value={item.instrumentId}>
+                    {item.propertyName || 'Property name unavailable'} · {item.instrumentId}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -1951,6 +2002,7 @@ function AuditorInvestmentsWorkspace({
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="font-medium">{item.instrumentId}</p>
+                      <p className="text-sm font-medium text-foreground">{item.propertyName || 'Property name unavailable'}</p>
                       <p className="text-sm text-muted-foreground">{item.contractBusinessId}</p>
                     </div>
                     <StatusBadge status={item.status} />
@@ -2019,6 +2071,7 @@ type PaymentVerifierSubscriptionRecord = {
   contractId: string;
   investor: string;
   instrumentId: string;
+  propertyName?: string;
   requestedUnits: number;
   upfrontAmount: number;
   paymentReference: string;
@@ -2036,11 +2089,27 @@ function PaymentVerifierInvestmentsWorkspace({ token }: { token: string }) {
   const loadData = React.useCallback(async () => {
     setLoading(true);
     try {
-      const [subscriptionResponse, fundingResponse] =
+      const [subscriptionResponse, fundingResponse, instrumentResponse, propertyResponse] =
         await Promise.all([
           getSubscriptions(token),
           getSubscriptionFundingConfirmations(token),
+          getInstruments(token).catch(() => []),
+          getProperties(token).catch(() => []),
         ]);
+
+      const propertyNameById = new Map(propertyResponse.map((property) => [property.propertyId, property.name] as const));
+      const propertyNameByInstrumentId = new Map(
+        instrumentResponse.map((event) => {
+          const args = getDamlCreateArguments<{ instrumentId?: unknown; propertyId?: unknown }>({
+            contractId: String(event.contractId),
+            createArguments: event.createArguments,
+          });
+          return [
+            toStringValue(args.instrumentId, ''),
+            propertyNameById.get(toStringValue(args.propertyId, '')) ?? 'Property name unavailable',
+          ] as const;
+        }),
+      );
 
       const normalizedSubscriptions = subscriptionResponse
         .map((event) => {
@@ -2056,6 +2125,7 @@ function PaymentVerifierInvestmentsWorkspace({ token }: { token: string }) {
             contractId: String(event.contractId),
             investor: toStringValue(args.investor, ''),
             instrumentId: toStringValue(args.instrumentId, ''),
+            propertyName: propertyNameByInstrumentId.get(toStringValue(args.instrumentId, '')),
             requestedUnits: toNumber(args.requestedUnits),
             upfrontAmount: toNumber(args.upfrontAmount),
             paymentReference: toStringValue(args.paymentReference, ''),
@@ -2169,6 +2239,9 @@ function PaymentVerifierInvestmentsWorkspace({ token }: { token: string }) {
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="font-medium">{item.instrumentId}</p>
+                      <p className="mt-0.5 truncate text-sm font-medium text-primary">
+                        {item.propertyName ?? 'Property name unavailable'}
+                      </p>
                       <p className="truncate text-sm text-muted-foreground">{item.investor}</p>
                       <p className="mt-2 text-sm">{item.requestedUnits} units - {formatCurrency(item.upfrontAmount)}</p>
                       <p className="mt-1 text-xs text-muted-foreground">Payment reference: {item.paymentReference}</p>

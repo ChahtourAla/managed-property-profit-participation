@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 
 import { approveUser, deactivateUser, getPendingUsers, getUsers, reactivateUser, rejectUser, type BackendUser } from '@/lib/backend-api';
 import { useSession } from '@/lib/session';
+import { localDamlParties } from '@/lib/role-config';
 import { PageHeader } from '@/components/dashboard/page-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -15,6 +16,25 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 
 function displayPartyName(partyId?: string | null) {
   return partyId?.split('::')[0] || 'No party assigned';
+}
+
+function buildInvestorPartyIds(users: BackendUser[], pendingUsers: BackendUser[]) {
+  const existingInvestorNumbers = users
+    .map((user) => user.partyId?.match(/^Investor(\d+)::/i)?.[1])
+    .filter(Boolean)
+    .map(Number);
+  let nextNumber = Math.max(0, ...existingInvestorNumbers) + 1;
+  const suffix = users.find((user) => user.partyId?.includes('::'))?.partyId?.split('::')[1]
+    || localDamlParties.investor1.split('::')[1];
+
+  return Object.fromEntries(
+    pendingUsers.map((user) => {
+      if (user.partyId) return [user.id, user.partyId];
+      if (user.role !== 'INVESTOR') return [user.id, ''];
+      const partyId = `Investor${nextNumber++}::${suffix}`;
+      return [user.id, partyId];
+    }),
+  );
 }
 
 export default function UsersPage() {
@@ -45,8 +65,9 @@ export default function UsersPage() {
       ]);
       setUsers(allUsers);
       setPendingUsers(waitingUsers);
+      const generatedPartyIds = buildInvestorPartyIds(allUsers, waitingUsers);
       setPartyIds((current) => Object.fromEntries(
-        waitingUsers.map((user) => [user.id, current[user.id] ?? user.partyId ?? ''])
+        waitingUsers.map((user) => [user.id, current[user.id] ?? generatedPartyIds[user.id] ?? ''])
       ));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Unable to load users');
@@ -364,7 +385,8 @@ export default function UsersPage() {
                   <Input
                     value={partyIds[actionUser.id] ?? ''}
                     onChange={(event) => setPartyIds((current) => ({ ...current, [actionUser.id]: event.target.value }))}
-                    placeholder="Owner::1220abc..."
+                    placeholder={actionUser.role === 'INVESTOR' ? 'Investor4::1220abc...' : 'Owner::1220abc...'}
+                    readOnly={actionUser.role === 'INVESTOR'}
                     aria-label="Daml Party ID"
                   />
                   <Button className="w-full gap-2" onClick={() => void handleApprove(actionUser)} disabled={approvingUser === actionUser.id}>
@@ -440,7 +462,8 @@ export default function UsersPage() {
                     <Input
                       value={partyIds[user.id] ?? ''}
                       onChange={(event) => setPartyIds((current) => ({ ...current, [user.id]: event.target.value }))}
-                      placeholder="Owner::1220abc..."
+                      placeholder={user.role === 'INVESTOR' ? 'Investor4::1220abc...' : 'Owner::1220abc...'}
+                      readOnly={user.role === 'INVESTOR'}
                       aria-label={`Daml party ID for ${user.email}`}
                     />
                     <Button
