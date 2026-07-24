@@ -2,7 +2,6 @@ import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
-  ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
@@ -24,17 +23,28 @@ export class InvestorsController {
   constructor(private readonly investorsService: InvestorsService) {}
 
   @ApiOperation({
-    summary: 'Approve investor',
+    summary: 'List eligible platform investors',
     description:
-      'Role required: EASYCOIN. Creates an ApprovedInvestor contract for a Daml investor party.',
+      'EASYCOIN or ADMIN only. Returns approved, active platform users with role INVESTOR and a linked Daml partyId. Easycoin uses this list to select investors before approving them on Daml.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Eligible platform investors returned successfully',
+  })
+  @Roles(UserRole.EASYCOIN, UserRole.ADMIN)
+  @Get('eligible')
+  getEligiblePlatformInvestors() {
+    return this.investorsService.getEligiblePlatformInvestors();
+  }
+
+  @ApiOperation({
+    summary: 'Approve investor on Daml',
+    description:
+      'EASYCOIN only. Creates an ApprovedInvestor contract on the Daml ledger for the selected investor party.',
   })
   @ApiResponse({
     status: 201,
-    description: 'Investor approved successfully',
-  })
-  @ApiResponse({
-    status: 403,
-    description: 'Only EASYCOIN can approve investors',
+    description: 'Investor approved successfully on Daml',
   })
   @Roles(UserRole.EASYCOIN)
   @Post('approve')
@@ -46,20 +56,13 @@ export class InvestorsController {
   }
 
   @ApiOperation({
-    summary: 'List approved investors',
+    summary: 'List Daml-approved investors',
     description:
-      'Roles allowed: EASYCOIN, LEGAL_ADMIN, INVESTOR. Normal users read only their own party view. EASYCOIN and ADMIN may use ?party=.',
-  })
-  @ApiQuery({
-    name: 'party',
-    required: false,
-    example: 'Easycoin::1220abc...',
-    description:
-      'Optional reader party. Only ADMIN and EASYCOIN are allowed to use this parameter.',
+      'Returns ApprovedInvestor contracts from the Daml ledger. This is different from eligible platform investors.',
   })
   @ApiResponse({
     status: 200,
-    description: 'Approved investors returned successfully',
+    description: 'Daml-approved investors returned successfully',
   })
   @Roles(UserRole.EASYCOIN, UserRole.LEGAL_ADMIN, UserRole.INVESTOR)
   @Get('approved')

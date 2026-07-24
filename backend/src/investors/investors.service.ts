@@ -1,11 +1,13 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+import { UserApprovalStatus } from '../common/enums/user-approval-status.enum';
 import { UserRole } from '../common/enums/user-role.enum';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { DamlClientService } from '../daml/daml-client/daml-client.service';
 import { getDefaultParties } from '../daml/parties';
 import { TEMPLATE_IDS } from '../daml/template-ids';
+import { PrismaService } from '../prisma/prisma.service';
 
 import { ApproveInvestorDto } from './dto/approve-investor.dto';
 
@@ -14,7 +16,34 @@ export class InvestorsService {
   constructor(
     private readonly damlClient: DamlClientService,
     private readonly configService: ConfigService,
+    private readonly prisma: PrismaService,
   ) {}
+
+  async getEligiblePlatformInvestors() {
+    return this.prisma.user.findMany({
+      where: {
+        role: UserRole.INVESTOR,
+        approvalStatus: UserApprovalStatus.APPROVED,
+        isActive: true,
+        partyId: {
+          not: null,
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        partyId: true,
+        approvalStatus: true,
+        isActive: true,
+        createdAt: true,
+      },
+    });
+  }
 
   async approveInvestor(user: AuthenticatedUser, dto: ApproveInvestorDto) {
     const defaultParties = getDefaultParties(this.configService);
